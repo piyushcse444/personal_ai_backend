@@ -1,0 +1,80 @@
+package com.personal_ai.backend.model;
+
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.UUID;
+
+@Entity
+@Table(name = "providers")
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class Provider {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    @Column(updatable = false, nullable = false)
+    private UUID id;
+
+    @Column(nullable = false, unique = true)
+    private String code;
+
+    @Column(name = "display_name", nullable = false)
+    private String displayName;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "provider_type", nullable = false)
+    private ProviderType providerType;
+
+    @Column(name = "base_url")
+    private String baseUrl;
+
+    @Column(name = "is_active", nullable = false)
+    @Builder.Default
+    private Boolean isActive = true;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private OffsetDateTime createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private OffsetDateTime updatedAt;
+
+    @OneToMany(mappedBy = "provider")
+    @Builder.Default
+    private List<Model> models = new java.util.ArrayList<>();
+
+    @OneToMany(mappedBy = "provider")
+    @JsonIgnore
+    @Builder.Default
+    private List<ProviderConfig> providerConfigs = new java.util.ArrayList<>();
+
+    @PrePersist
+    protected void onCreate() {
+        OffsetDateTime now = OffsetDateTime.now();
+        if (createdAt == null) {
+            createdAt = now;
+        }
+        if (updatedAt == null) {
+            updatedAt = now;
+        }
+        if (isActive == null) {
+            isActive = true;
+        }
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = OffsetDateTime.now();
+    }
+
+    public enum ProviderType {
+        CLOUD,
+        LOCAL,
+        SELF_HOSTED
+    }
+}

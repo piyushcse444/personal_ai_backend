@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: personal-ai
+  
+  datasource:
+    url: jdbc:postgresql://localhost:5432/personal-ai
+    username: postgres
+    password: Credo@123
+  
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+        default_batch_fetch_size: 50
+  
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+app:
+  cors:
+    allowed-origins: http://localhost:5173
+  jwt:
+    secret: change-this-to-a-long-random-secret-at-least-256-bits-in-production
+    expiration-ms: 86400000
+    refresh-expiration-ms: 604800000
