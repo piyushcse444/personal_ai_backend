@@ -12,7 +12,7 @@ import com.personal_ai.backend.service.provider.ProviderApiService;
 import com.personal_ai.backend.service.provider.ProviderApiServiceFactory;
 import com.personal_ai.backend.service.provider.ProviderConfigService;
 import com.personal_ai.backend.service.model.ModelService;
-import com.personal_ai.backend.service.model.impl.LlamaCppProviderApiServiceImpl;
+import com.personal_ai.backend.service.model.impl.UnslothProviderApiServiceImpl;
 import com.personal_ai.backend.repository.ConversationRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -39,21 +39,21 @@ public class ConversationController {
 	private final ProviderApiServiceFactory providerApiServiceFactory;
 	private final ConversationRepository conversationRepository;
 	private final ModelService modelService;
-	private final java.util.Optional<LlamaCppProviderApiServiceImpl> llamaCppProvider;
+	private final java.util.Optional<UnslothProviderApiServiceImpl> unslothProvider;
 
 	public ConversationController(ConversationService conversationService, MessageService messageService,
 								ProviderConfigService providerConfigService,
 								ProviderApiServiceFactory providerApiServiceFactory,
 								ConversationRepository conversationRepository,
 								ModelService modelService,
-								java.util.Optional<LlamaCppProviderApiServiceImpl> llamaCppProvider) {
+								java.util.Optional<UnslothProviderApiServiceImpl> unslothProvider) {
 		this.conversationService = conversationService;
 		this.messageService = messageService;
 		this.providerConfigService = providerConfigService;
 		this.providerApiServiceFactory = providerApiServiceFactory;
 		this.conversationRepository = conversationRepository;
 		this.modelService = modelService;
-		this.llamaCppProvider = llamaCppProvider;
+		this.unslothProvider = unslothProvider;
 	}
 
 	@PostMapping
@@ -297,10 +297,10 @@ public class ConversationController {
 			// Get conversation history for context
 			List<Message> history = messageService.findByConversationIdOrderByCreatedAtAsc(id);
 
-  		// Use streaming for llamacpp provider, fallback to sync for others
+  		// Use streaming for unsloth provider, fallback to sync for others
  			boolean thinking = request.getThinking() != null && request.getThinking();
- 			if ("llamacpp".equalsIgnoreCase(provider.getCode()) && llamaCppProvider.isPresent()) {
- 				return llamaCppProvider.get().chatStreaming(history, model, providerConfig, thinking, id, model.getId());
+ 			if ("unsloth".equalsIgnoreCase(provider.getCode()) && unslothProvider.isPresent()) {
+ 				return unslothProvider.get().chatStreaming(history, model, providerConfig, thinking, id, model.getId());
  			}
 
  			// Fallback: synchronous response wrapped in a single SSE event

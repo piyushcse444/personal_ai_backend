@@ -1,7 +1,7 @@
 package com.personal_ai.backend.service.provider;
 
 import com.personal_ai.backend.service.model.impl.GoogleProviderApiServiceImpl;
-import com.personal_ai.backend.service.model.impl.LlamaCppProviderApiServiceImpl;
+import com.personal_ai.backend.service.model.impl.UnslothProviderApiServiceImpl;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
@@ -13,16 +13,16 @@ public class ProviderApiServiceFactory {
 
 	private final Map<String, ProviderApiService> providers;
 
-	public ProviderApiServiceFactory(Optional<LlamaCppProviderApiServiceImpl> llamaCppProvider) {
+	public ProviderApiServiceFactory(Optional<UnslothProviderApiServiceImpl> unslothProvider) {
 		this.providers = new HashMap<>();
 		providers.put("google", new GoogleProviderApiServiceImpl());
-		llamaCppProvider.ifPresent(p -> providers.put("llamacpp", p));
+		unslothProvider.ifPresent(p -> providers.put("unsloth", p));
 	}
 
 	/**
 	 * Get the ProviderApiService implementation for the given provider code.
 	 *
-	 * @param providerCode the provider code (e.g., "openai", "anthropic", "google", "mistral", "ollama", "llamacpp")
+	 * @param providerCode the provider code (e.g., "openai", "anthropic", "google", "mistral", "ollama", "unsloth")
 	 * @return the corresponding ProviderApiService implementation
 	 * @throws IllegalArgumentException if no implementation is found for the provider code
 	 */

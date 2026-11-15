@@ -3,12 +3,14 @@ package com.personal_ai.backend.service.model.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.personal_ai.backend.service.model.LlamaCppServerManager;
+import com.personal_ai.backend.service.model.UnslothServerManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
@@ -16,6 +18,7 @@ import jakarta.annotation.PostConstruct;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -23,14 +26,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 @Service
-@ConditionalOnProperty(name = "app.llamacpp.enabled", havingValue = "true")
-public class LlamaCppServerManagerImpl implements LlamaCppServerManager {
+@ConditionalOnProperty(name = "app.unsloth.enabled", havingValue = "true")
+public class UnslothServerManagerImpl implements UnslothServerManager {
 
-	private static final Logger log = LoggerFactory.getLogger(LlamaCppServerManagerImpl.class);
+	private static final Logger log = LoggerFactory.getLogger(UnslothServerManagerImpl.class);
 
 	private final String baseUrl;
 	private final String apiKey;
-	private final String defaultModel;
 	private final int maxSeqLength;
 	private final RestClient restClient;
 	private final ObjectMapper objectMapper;
@@ -39,30 +41,36 @@ public class LlamaCppServerManagerImpl implements LlamaCppServerManager {
 	// Key: model path, Value: CompletableFuture that completes when loading finishes.
 	private final ConcurrentHashMap<String, CompletableFuture<Boolean>> loadingFutures = new ConcurrentHashMap<>();
 
+	// Cached model ID -> quant mapping, populated from /v1/models during ensureModelReady().
+	// Allows buildChatRequestBody() to resolve quant without an extra API call.
+	private volatile Map<String, String> modelQuantsCache = Collections.emptyMap();
+
 	// Dedicated executor for model loading — prevents blocking the common ForkJoinPool
 	// which can cause HikariCP thread starvation warnings.
 	private static final ExecutorService loadExecutor = Executors.newSingleThreadExecutor(
 			r -> new Thread(r, "unsloth-model-loader"));
 
-	public LlamaCppServerManagerImpl(
-			@org.springframework.beans.factory.annotation.Value("${app.llamacpp.base-url:http://127.0.0.1:8888}") String baseUrl,
-			@org.springframework.beans.factory.annotation.Value("${app.llamacpp.api-key:sk-unsloth-4203b2881dbe605f5363a3a333f63a22}") String apiKey,
-			@org.springframework.beans.factory.annotation.Value("${app.llamacpp.model:AtomicChat/LFM3-1.7B-Uncensored-GGUF}") String defaultModel,
-			@org.springframework.beans.factory.annotation.Value("${app.llamacpp.max-seq-length:2048}") int maxSeqLength) {
+	public UnslothServerManagerImpl(
+			@org.springframework.beans.factory.annotation.Value("${app.unsloth.base-url:http://127.0.0.1:8888}") String baseUrl,
+			@org.springframework.beans.factory.annotation.Value("${app.unsloth.api-key:sk-unsloth-4203b2881dbe605f5363a3a333f63a22}") String apiKey,
+			@org.springframework.beans.factory.annotation.Value("${app.unsloth.max-seq-length:2048}") int maxSeqLength) {
 		this.baseUrl = baseUrl;
 		this.apiKey = apiKey;
-		this.defaultModel = defaultModel;
 		this.maxSeqLength = maxSeqLength;
 		this.objectMapper = new ObjectMapper();
+		// Use SimpleClientHttpRequestFactory (HTTP/1.1 only) to avoid "Unsupported upgrade request"
+		// warnings from Unsloth server which doesn't support HTTP/2 upgrade (h2c ALPN)
+		ClientHttpRequestFactory requestFactory = ClientHttpRequestFactoryBuilder.simple().build();
 		this.restClient = RestClient.builder()
 				.baseUrl(baseUrl)
+				.requestFactory(requestFactory)
 				.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
 				.build();
 	}
 
 	@PostConstruct
 	public void init() {
-		log.info("LlamaCppServerManager initialized: baseUrl={}, model={}", baseUrl, defaultModel);
+		log.info("UnslothServerManager initialized: baseUrl={}", baseUrl);
 	}
 
 	@Override
@@ -103,6 +111,7 @@ public class LlamaCppServerManagerImpl implements LlamaCppServerManager {
 			JsonNode json = objectMapper.readTree(response);
 			JsonNode data = json.path("data");
 			List<ModelInfo> models = new ArrayList<>();
+			ConcurrentHashMap<String, String> quantsMap = new ConcurrentHashMap<>();
 			if (data.isArray()) {
 				for (JsonNode node : data) {
 					String id = node.path("id").asText("");
@@ -114,14 +123,35 @@ public class LlamaCppServerManagerImpl implements LlamaCppServerManager {
 					String displayName = node.path("display_name").asText("");
 					String statusValue = node.path("status").path("value").asText("");
 					models.add(new ModelInfo(id, object, created, ownedBy, loaded, quant, displayName, statusValue));
+					if (!id.isEmpty() && !quant.isEmpty()) {
+						quantsMap.put(id, quant);
+					}
 				}
 			}
+			// Update the cache so getQuantForModel() can use it
+			this.modelQuantsCache = Map.copyOf(quantsMap);
 			log.debug("Listed {} models from Unsloth API", models.size());
 			return models;
 		} catch (Exception e) {
 			log.error("Failed to list models from Unsloth API: {}", e.getMessage(), e);
 			return Collections.emptyList();
 		}
+	}
+
+	@Override
+	public String getQuantForModel(String modelId) {
+		String quant = modelQuantsCache.get(modelId);
+		if (quant != null && !quant.isEmpty()) {
+			return quant;
+		}
+		// Fallback: if cache is stale, try a live lookup
+		List<ModelInfo> models = listModels();
+		for (ModelInfo m : models) {
+			if (m.id().equals(modelId)) {
+				return m.quant().isEmpty() ? null : m.quant();
+			}
+		}
+		return null;
 	}
 
 	@Override
@@ -295,6 +325,7 @@ public class LlamaCppServerManagerImpl implements LlamaCppServerManager {
 			return false;
 		}
 		log.debug("Model {} exists in available models.", modelPath);
+		// modelQuantsCache is now populated from listModels() above
 
 		// Step 3: Check whether model is already loaded and serving
 		if (isModelLoaded(modelPath) && verifyModelServing(modelPath)) {

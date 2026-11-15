@@ -9,12 +9,14 @@ import com.personal_ai.backend.model.Message;
 import com.personal_ai.backend.model.Model;
 import com.personal_ai.backend.model.ProviderConfig;
 import com.personal_ai.backend.service.conversation.MessageService;
-import com.personal_ai.backend.service.model.LlamaCppServerManager;
+import com.personal_ai.backend.service.model.UnslothServerManager;
 import com.personal_ai.backend.service.provider.ProviderApiService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -33,34 +35,35 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 @Service
-@ConditionalOnProperty(name = "app.llamacpp.enabled", havingValue = "true")
-public class LlamaCppProviderApiServiceImpl implements ProviderApiService {
+@ConditionalOnProperty(name = "app.unsloth.enabled", havingValue = "true")
+public class UnslothProviderApiServiceImpl implements ProviderApiService {
 
-	private static final Logger log = LoggerFactory.getLogger(LlamaCppProviderApiServiceImpl.class);
+	private static final Logger log = LoggerFactory.getLogger(UnslothProviderApiServiceImpl.class);
 
-	private final LlamaCppServerManager serverManager;
+	private final UnslothServerManager serverManager;
 	private final RestClient restClient;
 	private final ObjectMapper objectMapper;
 	private final MessageService messageService;
 	private final String baseUrl;
 	private final String apiKey;
-	private final String modelPath;
 	private static final ExecutorService chatExecutor = Executors.newFixedThreadPool(
 			4, r -> new Thread(r, "unsloth-chat"));
 
-	public LlamaCppProviderApiServiceImpl(
-			LlamaCppServerManager serverManager,
+	public UnslothProviderApiServiceImpl(
+			UnslothServerManager serverManager,
 			MessageService messageService,
-			@org.springframework.beans.factory.annotation.Value("${app.llamacpp.base-url:http://127.0.0.1:8888}") String baseUrl,
-			@org.springframework.beans.factory.annotation.Value("${app.llamacpp.api-key:sk-unsloth-4203b2881dbe605f5363a3a333f63a22}") String apiKey,
-			@org.springframework.beans.factory.annotation.Value("${app.llamacpp.model:AtomicChat/LFM3-1.7B-Uncensored-GGUF}") String modelPath) {
+			@org.springframework.beans.factory.annotation.Value("${app.unsloth.base-url:http://127.0.0.1:8888}") String baseUrl,
+			@org.springframework.beans.factory.annotation.Value("${app.unsloth.api-key:sk-unsloth-4203b2881dbe605f5363a3a333f63a22}") String apiKey) {
 		this.serverManager = serverManager;
 		this.messageService = messageService;
 		this.baseUrl = baseUrl;
 		this.apiKey = apiKey;
-		this.modelPath = modelPath;
+		// Use SimpleClientHttpRequestFactory (HTTP/1.1 only) to avoid "Unsupported upgrade request"
+		// warnings from Unsloth server which doesn't support HTTP/2 upgrade (h2c ALPN)
+		ClientHttpRequestFactory requestFactory = ClientHttpRequestFactoryBuilder.simple().build();
 		this.restClient = RestClient.builder()
 				.baseUrl(baseUrl)
+				.requestFactory(requestFactory)
 				.defaultHeader(org.springframework.http.HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
 				.build();
 		this.objectMapper = new ObjectMapper();
@@ -68,7 +71,7 @@ public class LlamaCppProviderApiServiceImpl implements ProviderApiService {
 
 	@Override
 	public ProviderApiResponse chat(List<Message> messages, Model model, ProviderConfig config, boolean thinking) {
-		ensureModelReady();
+		ensureModelReady(model.getModelName());
 
 		String chatUrl = baseUrl + "/v1/chat/completions";
 		List<ChatMessage> chatMessages = messages.stream()
@@ -113,7 +116,7 @@ public class LlamaCppProviderApiServiceImpl implements ProviderApiService {
 	 */
 	public SseEmitter chatStreaming(List<Message> messages, Model model, ProviderConfig config, boolean thinking,
 			UUID conversationId, UUID modelId) {
-		ensureModelReady();
+		ensureModelReady(model.getModelName());
 
 		SseEmitter emitter = new SseEmitter(0L);
 		String chatUrl = baseUrl + "/v1/chat/completions";
@@ -307,20 +310,14 @@ public class LlamaCppProviderApiServiceImpl implements ProviderApiService {
 		ObjectNode body = objectMapper.createObjectNode();
 
 		// Model - use format "model_path:quant" for chat API
+		// Quant is resolved dynamically from the Unsloth API, not from config
 		String modelIdentifier = modelName;
 		if (!modelName.contains(":")) {
-			// Try to get the quant from the server manager
-			List<LlamaCppServerManager.ModelInfo> models = serverManager.listModels();
-			for (LlamaCppServerManager.ModelInfo m : models) {
-				if (m.id().equals(modelName) || m.id().startsWith(modelName)) {
-					if (m.quant() != null && !m.quant().isEmpty()) {
-						modelIdentifier = modelName + ":" + m.quant();
-					}
-					break;
-				}
-			}
-			if (modelIdentifier.equals(modelName)) {
-				modelIdentifier = modelName + ":Q4_K_M";
+			String quant = serverManager.getQuantForModel(modelName);
+			if (quant != null && !quant.isEmpty()) {
+				modelIdentifier = modelName + ":" + quant;
+			} else {
+				log.warn("Could not resolve quant for model {}, using name without quant suffix", modelName);
 			}
 		}
 		body.put("model", modelIdentifier);
@@ -358,11 +355,11 @@ public class LlamaCppProviderApiServiceImpl implements ProviderApiService {
 		return body;
 	}
 
-	private void ensureModelReady() {
-		boolean ready = serverManager.ensureModelReady(modelPath);
+	private void ensureModelReady(String modelName) {
+		boolean ready = serverManager.ensureModelReady(modelName);
 		if (!ready) {
-			log.error("Failed to ensure model {} is ready for inference", modelPath);
-			throw new IllegalStateException("Model is not ready for inference. Please check if Unsloth Studio is running.");
+			log.error("Failed to ensure model {} is ready for inference", modelName);
+			throw new IllegalStateException("Model " + modelName + " is not ready for inference. Please check if Unsloth Studio is running.");
 		}
 	}
 

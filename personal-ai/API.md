@@ -540,7 +540,7 @@ Test whether a config's credentials and endpoint can reach the provider.
 
 #### `POST /api/conversations`
 
-Start a new conversation with a model and optional provider config. For offline models (e.g., Llama.cpp), `providerConfigId` is optional — the backend looks up the provider from the model directly.
+Start a new conversation with a model and optional provider config. For offline models (e.g., Unsloth Studio), `providerConfigId` is optional — the backend looks up the provider from the model directly.
 
 **Request Body:**
 ```json
@@ -551,7 +551,7 @@ Start a new conversation with a model and optional provider config. For offline 
 }
 ```
 
-**Example for offline model (Llama.cpp):**
+**Example for offline model (Unsloth Studio):**
 ```json
 {
   "modelId": "21c2d3e4-f5a6-7890-cdef-901234567890",
@@ -729,11 +729,11 @@ Send a user message and receive a real assistant reply from the AI provider.
 
 The server fetches the conversation history, calls the provider's API using the conversation's model and config, saves both the user message and assistant response to the `message` table, and returns them.
 
-**Supported Providers**: OpenAI, Anthropic, Google AI (Gemini), Mistral AI, Ollama, Llama.cpp (local offline).
+**Supported Providers**: OpenAI, Anthropic, Google AI (Gemini), Mistral AI, Ollama, Unsloth Studio (local offline).
 
 #### `POST /api/conversations/{id}/messages/stream`
 
-Stream an assistant reply in real-time using Server-Sent Events (SSE). Available for the Llama.cpp provider; other providers fall back to a synchronous response. After streaming completes, only the final assistant response (without thinking content) is automatically saved to the `message` table. Thinking content is streamed to the frontend but not persisted.
+Stream an assistant reply in real-time using Server-Sent Events (SSE). Available for the Unsloth Studio provider; other providers fall back to a synchronous response. After streaming completes, only the final assistant response (without thinking content) is automatically saved to the `message` table. Thinking content is streamed to the frontend but not persisted.
 
 **Request Body:**
 ```json
@@ -858,25 +858,26 @@ All configurable values are in `src/main/resources/application.yml`:
 | `app.jwt.secret` | *(placeholder)* | JWT signing secret (change in production) |
 | `app.jwt.expiration-ms` | `86400000` | JWT access token lifetime in milliseconds (24 hours) |
 | `app.jwt.refresh-expiration-ms` | `604800000` | Refresh token lifetime in milliseconds (7 days) |
-| `app.llamacpp.enabled` | `true` | Enable/disable the Llama.cpp local provider (Unsloth Studio) |
-| `app.llamacpp.base-url` | `http://127.0.0.1:8888` | Base URL of the Unsloth Studio API |
-| `app.llamacpp.api-key` | `sk-unsloth-...` | Bearer token for Unsloth API authentication |
-| `app.llamacpp.model` | `AtomicChat/LFM3-1.7B-Uncensored-GGUF` | Model path/identifier in Unsloth |
-| `app.llamacpp.max-seq-length` | `2048` | Maximum sequence length for model loading |
+| `app.unsloth.enabled` | `true` | Enable/disable the Unsloth Studio provider |
+| `app.unsloth.base-url` | `http://127.0.0.1:8888` | Base URL of the Unsloth Studio API |
+| `app.unsloth.api-key` | `sk-unsloth-...` | Bearer token for Unsloth API authentication |
+| `app.unsloth.max-seq-length` | `100000` | Maximum sequence length for model loading |
+| *(no model config)* | — | Models are discovered dynamically from Unsloth's `/v1/models` endpoint at runtime. Adding a new model requires only a database row change. |
 
 ---
 
-## Llama.cpp Local Provider (Unsloth Studio)
+## Unsloth Studio Provider
 
-The `llamacpp` provider communicates with the Unsloth Studio API (running on port 8888) for model management and inference. Key behaviors:
+The `unsloth` provider communicates with the Unsloth Studio API (running on port 8888) for model management and inference. Key behaviors:
 
 - **Unsloth Studio API**: Instead of managing a local `llama-cli` process, the backend calls the Unsloth Studio API for health checks, model loading/unloading, and chat completions.
 - **Model readiness flow**: Before each chat request, the backend ensures the model is ready: (1) check Unsloth health, (2) verify model exists, (3) check if model is loaded, (4) verify model is serving, (5) load if needed.
 - **Concurrency control**: If multiple requests arrive while the model is loading, only one load operation runs. Concurrent requests wait on the same `CompletableFuture` until loading completes.
 - **Health vs model readiness**: `/api/health` returning healthy only means the Unsloth service is up — it does not guarantee the model is loaded and ready for inference.
 - **SSE streaming**: Use `POST /api/conversations/{id}/messages/stream` for real-time token streaming with thinking visibility.
-- **No provider config needed**: The `providerConfigId` is optional when creating a conversation with the Llama.cpp model.
-- **Requirements**: Unsloth Studio must be running on the configured port, and the model (`AtomicChat/LFM3-1.7B-Uncensored-GGUF`) must be available in Unsloth.
+- **No provider config needed**: The `providerConfigId` is optional when creating a conversation with the Unsloth model.
+- **Multi-model support**: The backend supports any number of models — no model list in config. Models are discovered from Unsloth's `/v1/models` endpoint at runtime. The model is resolved from the conversation's `Model` entity — `ensureModelReady()` loads whichever model the conversation uses. Quantization variants are cached from the API response for fast lookup.
+- **Requirements**: Unsloth Studio must be running on the configured port, and the model must be available in Unsloth.
 
 ### Model Loading Flow
 
@@ -948,7 +949,7 @@ The response includes `Access-Control-Allow-Origin` headers matching the request
 
 ## Known Bug Fixes
 
-- **Null prefix in streaming responses**: Fixed `JsonNode.isNull()` check in `LlamaCppProviderApiServiceImpl` — when the LLM sends a chunk where `content` or `reasoning_content` is JSON `null`, it was being parsed as the literal string `"null"`. Null values are now treated as empty strings.
+- **Null prefix in streaming responses**: Fixed `JsonNode.isNull()` check in `UnslothProviderApiServiceImpl` — when the LLM sends a chunk where `content` or `reasoning_content` is JSON `null`, it was being parsed as the literal string `"null"`. Null values are now treated as empty strings.
 - **SSE AuthorizationDeniedException**: Fixed by enabling async security context propagation and adding `permitAll` for the stream endpoint in `SecurityConfig`.
 - **Conversation not found during streaming**: Removed race-prone `existsById` check in `MessageServiceImpl.createMessage()` — database foreign key constraints now validate existence atomically at save time.
 - **Health vs model readiness**: `/api/health` returning healthy only means the Unsloth service is up, not that the model is loaded. `ensureModelReady()` follows a strict flow: health → model exists → model loaded → model serving.
@@ -956,6 +957,8 @@ The response includes `Access-Control-Allow-Origin` headers matching the request
 - **HTTP 401 authentication errors**: `RestClient.create()` was used without any authentication header, so all chat requests to Unsloth API failed with 401. Fixed by configuring `RestClient` with `Bearer` token via `defaultHeader`. The streaming path (`HttpURLConnection`) also lacked the `Authorization` header — added it.
 - **HikariCP thread starvation**: `CompletableFuture.supplyAsync()` without a dedicated executor ran model loading (blocking for up to 60 seconds) on the common ForkJoinPool, starving HikariCP's housekeeper thread and causing warnings like `Thread starvation or clock leap detected`. Fixed by creating a dedicated `ExecutorService` (`unsloth-model-loader`) passed to `supplyAsync()`.
 - **HikariCP pool tuning**: Added explicit HikariCP configuration to `application.yml` (`maximum-pool-size: 20`, `minimum-idle: 5`, `connection-timeout: 20000`, `max-lifetime: 1200000`) for more predictable connection pool behavior.
+- **Multi-model support**: Replaced single hardcoded `app.unsloth.model` with a configurable list `app.unsloth.models`. The service dynamically resolves the model from the conversation's `Model` entity, supporting multiple models (e.g., LFM3-1.7B and Gemma-4-E4B) with different quantizations. Quant lookup is done from the config map first, falling back to a live `/v1/models` query.
+- **Fully dynamic model resolution**: Removed `app.unsloth.models` config entirely. Model IDs and quantization variants are now discovered from Unsloth's `/v1/models` endpoint at runtime. A cached map (`modelQuantsCache`) is populated during `ensureModelReady()` so `buildChatRequestBody()` can resolve the quant suffix without an extra API call. Adding a new model requires only a database row change — no code or config edits.
 
 ---
 
@@ -965,5 +968,6 @@ Flyway migrations in `src/main/resources/db/migration/`:
 - `V1__init_schema.sql` — Core schema (users, auth_sessions, providers, models, provider_configs, conversations, messages)
 - `V2__seed_providers_and_models.sql` — Seeded 6 providers and initial models
 - `V3__add_qwen3_models.sql` — Added Qwen3 models
-- `V5__add_llamacpp_provider_and_model.sql` — Added Llama.cpp provider and LFM3-1.7B model
+- `V5__add_llamacpp_provider_and_model.sql` — Added Unsloth provider and LFM3-1.7B model
+- `V8__rename_llamacpp_to_unsloth.sql` — Renamed provider code from "llamacpp" to "unsloth", added Gemma-4-E4B model
 - `V7__create_archive_tables.sql` — Created `archive_conversation` and `archive_message` tables for preserving chat history

@@ -6,7 +6,7 @@ import java.util.List;
  * Manages interaction with the Unsloth Studio API for model inference.
  * Replaces the previous local llama.cpp process management with API-based model control.
  */
-public interface LlamaCppServerManager {
+public interface UnslothServerManager {
 
 	/**
 	 * Check if the Unsloth API server is healthy and responsive.
@@ -61,6 +61,15 @@ public interface LlamaCppServerManager {
 	 * @return true if the model is ready for inference
 	 */
 	boolean ensureModelReady(String modelPath);
+
+	/**
+	 * Look up the quantization variant for a model from the cached model list.
+	 * The cache is populated during ensureModelReady() via listModels().
+	 *
+	 * @param modelId the model id (e.g., "AtomicChat/LFM3-1.7B-Uncensored-GGUF")
+	 * @return the quant string (e.g., "Q4_K_M"), or null if not found
+	 */
+	String getQuantForModel(String modelId);
 
 	/**
 	 * Information about an available model.

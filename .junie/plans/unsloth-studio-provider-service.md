@@ -5,10 +5,10 @@ sessionId: session-261114-095336-1s7p
 # Requirements
 
 ### Overview
-Create a `LlamaCppProviderApiServiceImpl` that communicates with the Unsloth Studio API (running on port `8888`) to manage model loading/unloading and respond to chat requests from the frontend using the Unsloth OpenAI-compatible API endpoints.
+Create a `UnslothProviderApiServiceImpl` that communicates with the Unsloth Studio API (running on port `8888`) to manage model loading/unloading and respond to chat requests from the frontend using the Unsloth OpenAI-compatible API endpoints.
 
 ### Goals
-1. When a request arrives for the offline llama.cpp model, ensure the model info exists in the `models` table with `isOffline=true` and a large context window.
+1. When a request arrives for the offline Unsloth Studio model, ensure the model info exists in the `models` table with `isOffline=true` and a large context window.
 2. Check Unsloth API health, verify the model exists, check if it's loaded and serving, and load it if needed.
 3. Handle model loading concurrency — coalesce concurrent requests so only one load operation runs.
 4. Send the chat prompt to the Unsloth API and stream the response back to the frontend via SSE (Server-Sent Events), including thinking/reasoning steps if the model produces them.
@@ -22,8 +22,8 @@ Create a `LlamaCppProviderApiServiceImpl` that communicates with the Unsloth Stu
 
 ### Scope
 **In Scope:**
-- `LlamaCppProviderApiServiceImpl` — provider implementation using Unsloth API
-- `LlamaCppServerManager` — manages model lifecycle via Unsloth API (health check, list models, load/unload, inference status)
+- `UnslothProviderApiServiceImpl` — provider implementation using Unsloth API
+- `UnslothServerManager` — manages model lifecycle via Unsloth API (health check, list models, load/unload, inference status)
 - SSE streaming endpoint in `ConversationController` for the offline model
 - Model seeded in the database via Flyway migration on startup
 - Configuration properties in `application.yml`
@@ -38,7 +38,7 @@ Create a `LlamaCppProviderApiServiceImpl` that communicates with the Unsloth Stu
 
 ### Current Implementation
 - **ProviderApiService** interface (`service/ProviderApiService.java`) defines `chat(List<Message>, Model, ProviderConfig, boolean thinking)` returning `ProviderApiResponse`.
-- **ProviderApiServiceFactory** (`service/ProviderApiServiceFactory.java`) maps provider codes (`openai`, `anthropic`, `google`, `mistral`, `ollama`, `llamacpp`) to implementations.
+- **ProviderApiServiceFactory** (`service/ProviderApiServiceFactory.java`) maps provider codes (`openai`, `anthropic`, `google`, `mistral`, `ollama`, `unsloth`) to implementations.
 - **ConversationController.sendMessage()** calls the provider API synchronously and returns the full response.
 - SSE streaming via `POST /api/conversations/{id}/messages/stream` returns `SseEmitter`.
 
@@ -48,16 +48,16 @@ Create a `LlamaCppProviderApiServiceImpl` that communicates with the Unsloth Stu
 3. **Concurrency control for model loading** — Uses `ConcurrentHashMap` with `CompletableFuture` to coalesce concurrent requests during model loading. Only one thread triggers the load; others wait on the same future.
 4. **SSE with thinking visibility** — Stream tokens via SSE; parse and expose reasoning/thinking steps separately via `enable_thinking` parameter.
 5. **Tool support** — The Unsloth API supports `enable_tools` with `enabled_tools` array (web_search, python, terminal).
-6. **New provider code `llamacpp`** — Registered in `ProviderApiServiceFactory`.
-7. **Model seeded via Flyway migration** — The llama.cpp provider and model are inserted into the database via `V5__add_llamacpp_provider_and_model.sql` with `isOffline=true` and `contextWindow=8192`.
+6. **New provider code `unsloth`** — Registered in `ProviderApiServiceFactory`.
+7. **Model seeded via Flyway migration** — The Unsloth Studio provider and model are inserted into the database via `V5__add_unsloth_provider_and_model.sql` with `isOffline=true` and `contextWindow=8192`.
 
 ### Architecture Diagram
 
 ``` mermaid
 graph LR
     A[Frontend] -->|POST /api/conversations/{id}/messages| B[ConversationController]
-    B -->|provider=llamacpp| C[LlamaCppProviderApiServiceImpl]
-    C -->|ensureModelReady| D[LlamaCppServerManager]
+    B -->|provider=unsloth| C[UnslothProviderApiServiceImpl]
+    C -->|ensureModelReady| D[UnslothServerManager]
     D -->|/api/health| E[Unsloth API :8888]
     D -->|/v1/models| E
     D -->|/api/inference/status| E
@@ -71,7 +71,7 @@ graph LR
 
 ### Proposed Changes
 
-#### 1. LlamaCppServerManager (refactored service)
+#### 1. UnslothServerManager (refactored service)
 - Manages model lifecycle via Unsloth Studio API.
 - `checkHealth()` — calls `/api/health` to verify Unsloth service is healthy.
 - `listModels()` — calls `/v1/models` to list available models.
@@ -83,7 +83,7 @@ graph LR
 - Concurrency control via `ConcurrentHashMap<String, CompletableFuture<Boolean>>` to coalesce concurrent load requests.
 - Polling with timeout (up to 30 seconds, 1-second intervals) after load to verify model is serving.
 
-#### 2. LlamaCppProviderApiServiceImpl (refactored service)
+#### 2. UnslothProviderApiServiceImpl (refactored service)
 - Implements `ProviderApiService`.
 - `chat()` method: ensures model is ready via `ensureModelReady()`, then calls `/v1/chat/completions` (non-streaming).
 - Returns `ProviderApiResponse` for the synchronous path.
@@ -94,19 +94,19 @@ graph LR
 
 #### 3. Streaming endpoint in ConversationController
 - Endpoint `POST /api/conversations/{id}/messages/stream` that returns `SseEmitter`.
-- For `llamacpp` provider, uses `chatStreaming()` with thinking and tools support.
+- For `unsloth` provider, uses `chatStreaming()` with thinking and tools support.
 - Emits token chunks as they arrive; thinking content marked with `isThinking` flag.
 
 #### 4. Model Seeded via Flyway Migration
-- `V5__add_llamacpp_provider_and_model.sql` inserts the `llamacpp` provider (`code=llamacpp`, `type=LOCAL`) and the model (`isOffline=true`, `contextWindow=8192`) into the database.
+- `V5__add_unsloth_provider_and_model.sql` inserts the `unsloth` provider (`code=unsloth`, `type=LOCAL`) and the model (`isOffline=true`, `contextWindow=8192`) into the database.
 - No runtime Java code is needed — the model is available in the DB before the app starts serving requests.
 
 #### 5. Configuration Properties
-- `app.llamacpp.enabled=true`
-- `app.llamacpp.base-url=http://127.0.0.1:8888`
-- `app.llamacpp.api-key=sk-unsloth-...` (Bearer token for API auth)
-- `app.llamacpp.model=AtomicChat/LFM3-1.7B-Uncensored-GGUF`
-- `app.llamacpp.max-seq-length=2048`
+- `app.unsloth.enabled=true`
+- `app.unsloth.base-url=http://127.0.0.1:8888`
+- `app.unsloth.api-key=sk-unsloth-...` (Bearer token for API auth)
+- `app.unsloth.max-seq-length=100000`
+- **No model list in config** — Models are discovered dynamically from Unsloth's `/v1/models` endpoint. Adding a new model only requires a row in the `models` database table pointing to the `unsloth` provider. The quantization variant is resolved at runtime from the API response.
 
 ### Data Models / Contracts
 
@@ -125,9 +125,9 @@ event: error
 data: {"message": "Server not responding"}
 ```
 
-**LlamaCppServerManager interface:**
+**UnslothServerManager interface:**
 ```java
-public interface LlamaCppServerManager {
+public interface UnslothServerManager {
     boolean checkHealth();
     List<ModelInfo> listModels();
     InferenceStatus getInferenceStatus();
@@ -166,20 +166,22 @@ public interface LlamaCppServerManager {
 }
 ```
 
+The `model` field is dynamically resolved from the conversation's `Model` entity. The quant suffix (e.g., `:Q4_K_M` or `:Q2_K_P`) is resolved at runtime from the cached `/v1/models` response — no config needed. The cache is populated during `ensureModelReady()` and provides instant lookups via `getQuantForModel()`.
+
 ### File Structure
 ```
 src/main/java/com/personal_ai/backend/
 ├── resources/db/migration/
-│   └── V5__add_llamacpp_provider_and_model.sql (seeds provider and model)
+│   └── V5__add_unsloth_provider_and_model.sql (seeds provider and model)
 ├── service/model/
-│   ├── LlamaCppServerManager.java             (interface — Unsloth API management)
+│   ├── UnslothServerManager.java             (interface — Unsloth API management)
 │   └── impl/
-│       ├── LlamaCppServerManagerImpl.java     (Unsloth API client)
-│       └── LlamaCppProviderApiServiceImpl.java (provider API — chat and streaming)
+│       ├── UnslothServerManagerImpl.java     (Unsloth API client)
+│       └── UnslothProviderApiServiceImpl.java (provider API — chat and streaming)
 ├── controller/
 │   └── ConversationController.java            (streaming endpoint)
 src/main/resources/
-└── application.yml                            (llamacpp config — base-url, api-key, model)
+└── application.yml                            (unsloth config — base-url, api-key, model)
 ```
 
 ### Risks
@@ -200,7 +202,7 @@ Since the Unsloth Studio API requires the service to be running locally, full in
 3. **Model loading**: `loadModel()` successfully loads a model via `/api/inference/load`.
 4. **Concurrency control**: Concurrent requests during model loading coalesce to a single load operation.
 5. **Ensure model ready**: Full flow — health → model exists → loaded → serving — works correctly.
-6. **Chat response**: `LlamaCppProviderApiServiceImpl.chat()` returns a `ProviderApiResponse` with content from the model.
+6. **Chat response**: `UnslothProviderApiServiceImpl.chat()` returns a `ProviderApiResponse` with content from the model.
 7. **Streaming**: SSE endpoint emits token chunks and completes on `done` event.
 8. **Model DB seeding**: The V5 migration inserts the provider and model; Flyway applies it on startup.
 
@@ -213,24 +215,26 @@ Since the Unsloth Studio API requires the service to be running locally, full in
 - Model loaded but not serving — polling loop waits up to 30 seconds for model to start serving.
 
 ### Bug Fixes Applied
-- **Null prefix in streaming responses**: Fixed `JsonNode.isNull()` check in `LlamaCppProviderApiServiceImpl` — when the LLM sends a chunk where `content` or `reasoning_content` is JSON `null`, it was being parsed as the literal string `"null"`. Null values are now treated as empty strings.
+- **Null prefix in streaming responses**: Fixed `JsonNode.isNull()` check in `UnslothProviderApiServiceImpl` — when the LLM sends a chunk where `content` or `reasoning_content` is JSON `null`, it was being parsed as the literal string `"null"`. Null values are now treated as empty strings.
 - **Health vs model readiness**: `/api/health` returning healthy only means Unsloth service is up, not that the model is loaded. `ensureModelReady()` follows a strict flow: health → model exists → model loaded → model serving.
 - **Model loading concurrency**: Uses `ConcurrentHashMap` with `CompletableFuture` to coalesce concurrent load requests. Only one thread triggers the load; others wait.
 - **HTTP 401 authentication errors**: `RestClient.create()` was used without any authentication header, so all chat requests to Unsloth API failed with 401. Fixed by configuring `RestClient` with `Bearer` token via `defaultHeader`. The streaming path (`HttpURLConnection`) also lacked the `Authorization` header — added it.
 - **HikariCP thread starvation**: `CompletableFuture.supplyAsync()` without a dedicated executor ran model loading (blocking for up to 60 seconds) on the common ForkJoinPool, starving HikariCP's housekeeper thread. Fixed by creating a dedicated `ExecutorService` (`unsloth-model-loader`) passed to `supplyAsync()`.
 - **HikariCP pool tuning**: Added explicit HikariCP configuration to `application.yml` (`maximum-pool-size: 20`, `minimum-idle: 5`, `connection-timeout: 20000`, `max-lifetime: 1200000`) for more predictable connection pool behavior.
+- **Multi-model support**: Replaced single hardcoded `app.unsloth.model` with a configurable list `app.unsloth.models` in `application.yml`. The service now dynamically resolves the model from the conversation's `Model` entity, supporting multiple models (e.g., LFM3-1.7B and Gemma-4-E4B) with different quantizations. `ensureModelReady()` uses the requested model name instead of a fixed config value. Quant lookup is done from the config map first, falling back to a live `/v1/models` query.
+- **Fully dynamic model resolution**: Removed `app.unsloth.models` config entirely. Model IDs and quantization variants are now discovered from Unsloth's `/v1/models` endpoint at runtime. A cached map (`modelQuantsCache`) is populated during `ensureModelReady()` so `buildChatRequestBody()` can resolve the quant suffix without an extra API call. Adding a new model requires only a database row change — no code or config edits.
 
 # Delivery Steps
 
-### ✓ Step 1: Refactor LlamaCppServerManager for Unsloth API
+### ✓ Step 1: Refactor UnslothServerManager for Unsloth API
 Replace process management with Unsloth Studio API integration.
-- Update `LlamaCppServerManager` interface: replace `start()`, `stop()`, `isRunning()`, `resetIdleTimer()` with `checkHealth()`, `listModels()`, `getInferenceStatus()`, `loadModel()`, `unloadModel()`, `isModelLoaded()`, `ensureModelReady()`.
-- Rewrite `LlamaCppServerManagerImpl` to call Unsloth API endpoints (`/api/health`, `/v1/models`, `/api/inference/status`, `/api/inference/load`, `/api/inference/unload`) with Bearer token auth.
+- Update `UnslothServerManager` interface: replace `start()`, `stop()`, `isRunning()`, `resetIdleTimer()` with `checkHealth()`, `listModels()`, `getInferenceStatus()`, `loadModel()`, `unloadModel()`, `isModelLoaded()`, `ensureModelReady()`.
+- Rewrite `UnslothServerManagerImpl` to call Unsloth API endpoints (`/api/health`, `/v1/models`, `/api/inference/status`, `/api/inference/load`, `/api/inference/unload`) with Bearer token auth.
 - Add concurrency control for model loading via `ConcurrentHashMap<String, CompletableFuture<Boolean>>`.
 - Add polling with timeout to verify model is serving after load.
 - Update `application.yml`: replace `port`, `cli-path`, `idle-timeout-minutes` with `base-url`, `api-key`, `max-seq-length`.
 
-### ✓ Step 2: Update LlamaCppProviderApiServiceImpl
+### ✓ Step 2: Update UnslothProviderApiServiceImpl
 Update the provider API implementation to use Unsloth API.
 - Update `chat()` and `chatStreaming()` to call `ensureModelReady()` before each request.
 - Implement `buildChatRequestBody()` to produce Unsloth format with `enable_thinking`, `enable_tools`, `enabled_tools` (web_search, python, terminal), `permission_mode`, and generation params.
