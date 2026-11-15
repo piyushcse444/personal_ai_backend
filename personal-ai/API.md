@@ -739,13 +739,17 @@ Stream an assistant reply in real-time using Server-Sent Events (SSE). Available
 ```json
 {
   "content": "Explain quantum computing",
-  "thinking": true
+  "thinking": true,
+  "internet": true
 }
 ```
 
 **Field descriptions:**
-- `content` (required) — The user's message text
-- `thinking` (optional) — Enable/disable thinking/reasoning mode. When `true` (default), reasoning-capable models will produce thinking content. When `false`, thinking is disabled at the model level and no reasoning content is generated.
+- `content` (optional) — The user's message text. Required if no image is provided.
+- `thinking` (optional, default `true`) — Enable/disable thinking/reasoning mode. When `true`, reasoning-capable models will produce thinking content. When `false`, thinking is disabled at the model level and no reasoning content is generated.
+- `internet` (optional, default `true`) — Enable/disable internet access and tool usage. When `true`, the model can use tools like `web_search`, `python`, and `terminal`. When `false`, all tools are disabled and the model runs in offline mode.
+- `imageBase64` (optional) — Base64-encoded image data (without the `data:` prefix). Only sent when the model supports vision.
+- `imageMimeType` (optional) — MIME type of the uploaded image (e.g., `image/png`, `image/jpeg`). Required if `imageBase64` is provided.
 
 **SSE Events:**
 ```
@@ -920,8 +924,8 @@ The Llama.cpp provider sends a structured JSON request to the Unsloth API with t
 | `repetition_penalty` | `1.1` | Repetition penalty factor |
 | `max_tokens` | `1024` | Maximum tokens to generate |
 | `enable_thinking` | `true`/`false` | Enable/disable reasoning/thinking mode (bound to `thinking` request param) |
-| `enable_tools` | `true`/`false` | Enable/disable tool usage (web search, Python, terminal) |
-| `enabled_tools` | Array of tool names | `["web_search", "python", "terminal"]` when tools enabled |
+| `enable_tools` | `true`/`false` | Controlled by the `internet` request param — when `false`, all tools are disabled |
+| `enabled_tools` | Array of tool names | `["web_search", "python", "terminal"]` when `internet: true`, empty array `[]` when `internet: false` |
 | `permission_mode` | `"off"` | Tool permission mode |
 | `stream` | `true`/`false` | Streaming flag |
 
@@ -956,6 +960,60 @@ The `supportsVision` flag is exposed in:
 - `GET /api/conversations/{id}` — returns `ConversationResponse` with `model.supportsVision` flag
 - The frontend uses this flag to show/hide the image upload button
 
+### Unsloth Model Management API
+
+When VRAM is limited and you cannot run two models simultaneously, use these endpoints to manage model loading/unloading at runtime. All endpoints require authentication.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/unsloth/models/{modelId}/unload` | POST | Unload a specific model from Unsloth to free up VRAM |
+| `/api/unsloth/models` | GET | List all models available in Unsloth with their load status |
+| `/api/unsloth/status` | GET | Get current inference status (loaded and serving models) |
+| `/api/unsloth/health` | GET | Check if the Unsloth API service is healthy |
+
+**Unload a model example:**
+```
+curl --location --request POST 'http://localhost:8080/api/unsloth/models/AtomicChat/LFM3-1.7B-Uncensored-GGUF/unload' \
+--header 'Authorization: Bearer <JWT_TOKEN>'
+```
+
+**Response on success:**
+```json
+{
+  "success": true,
+  "message": "Model AtomicChat/LFM3-1.7B-Uncensored-GGUF unloaded successfully",
+  "model": "AtomicChat/LFM3-1.7B-Uncensored-GGUF"
+}
+```
+
+**List models example:**
+```
+curl --location --request GET 'http://localhost:8080/api/unsloth/models' \
+--header 'Authorization: Bearer <JWT_TOKEN>'
+```
+
+**Response:**
+```json
+[
+  {
+    "id": "HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive",
+    "object": "model",
+    "loaded": true,
+    "quant": "Q2_K_P",
+    "statusValue": "loaded"
+  },
+  {
+    "id": "AtomicChat/LFM3-1.7B-Uncensored-GGUF",
+    "object": "model",
+    "loaded": false,
+    "quant": "Q4_K_M",
+    "statusValue": "unloaded"
+  }
+]
+```
+
+The frontend can use these endpoints to show which models are currently loaded and allow the user to unload a model before switching to another one.
+
 ---
 
 ## SSE Streaming Security Notes
@@ -982,7 +1040,10 @@ The response includes `Access-Control-Allow-Origin` headers matching the request
 - **Multi-model support**: Replaced single hardcoded `app.unsloth.model` with a configurable list `app.unsloth.models`. The service dynamically resolves the model from the conversation's `Model` entity, supporting multiple models (e.g., LFM3-1.7B and Gemma-4-E4B) with different quantizations. Quant lookup is done from the config map first, falling back to a live `/v1/models` query.
 - **Fully dynamic model resolution**: Removed `app.unsloth.models` config entirely. Model IDs and quantization variants are now discovered from Unsloth's `/v1/models` endpoint at runtime. A cached map (`modelQuantsCache`) is populated during `ensureModelReady()` so `buildChatRequestBody()` can resolve the quant suffix without an extra API call. Adding a new model requires only a database row change — no code or config edits.
 - **Image upload for vision models**: Added `supports_vision` column to the `models` table (V9 migration). The Gemma-4-E4B model is marked as vision-capable. `SendMessageRequest` accepts `imageBase64` and `imageMimeType` fields. When an image is sent, the backend formats the last user message using the multi-content array format (`type: text` + `type: image_url`) compatible with the Unsloth API. The `supportsVision` flag is exposed in `ConversationResponse.ModelInfo` so the frontend can enable/disable the image upload button.
-- **Frontend requirements**: The frontend must (1) add `supportsVision` to model DTO, (2) conditionally show image upload button based on `supportsVision`, (3) encode images as base64 without `data:` prefix, (4) include `imageBase64` and `imageMimeType` in message request, (5) display image thumbnails in chat history, and (6) **lock model selector** once a conversation has messages to prevent mid-conversation model switching.
+- **Frontend requirements**: The frontend must (1) add `supportsVision` to model DTO, (2) conditionally show image upload button based on `supportsVision`, (3) encode images as base64 without `data:` prefix, (4) include `imageBase64` and `imageMimeType` in message request, (5) display image thumbnails in chat history, (6) **lock model selector** once a conversation has messages to prevent mid-conversation model switching, and (7) add an **"Internet Access" toggle** that sends the `internet` boolean in every message request (default `true`).
+- **Model unload API**: Added `UnslothModelController` with endpoints to unload a model (`POST /api/unsloth/models/{modelId}/unload`), list models with load status (`GET /api/unsloth/models`), check inference status (`GET /api/unsloth/status`), and check Unsloth health (`GET /api/unsloth/health`). This allows users with limited VRAM to unload a model before switching to another one. All endpoints require authentication.
+- **Internet access toggle**: Added `internet` boolean field to `SendMessageRequest` DTO. When `true` (default), the model enables tools (`web_search`, `python`, `terminal`). When `false`, all tools are disabled and the model runs in offline mode. The frontend controls this via the `internet` toggle.
+- **Bug fixes**: Fixed duplicate user message bug in `chatStreaming` when an image was sent (the old code added a second user message after updating the last one). Added image support to the non-streaming `chat` method. Added debug logging in `buildChatRequestBody`.
 
 ---
 

@@ -306,12 +306,13 @@ public class ConversationController {
 			List<Message> history = messageService.findByConversationIdOrderByCreatedAtAsc(id);
 
   		// Use streaming for unsloth provider, fallback to sync for others
- 			boolean thinking = request.getThinking() != null && request.getThinking();
- 			if ("unsloth".equalsIgnoreCase(provider.getCode()) && unslothProvider.isPresent()) {
- 				String imageBase64 = request.getImageBase64();
- 				String imageMimeType = request.getImageMimeType();
- 				return unslothProvider.get().chatStreaming(history, model, providerConfig, thinking, id, model.getId(), imageBase64, imageMimeType);
- 			}
+			boolean thinking = request.getThinking() != null && request.getThinking();
+			boolean internet = request.getInternet() == null || request.getInternet();
+			if ("unsloth".equalsIgnoreCase(provider.getCode()) && unslothProvider.isPresent()) {
+				String imageBase64 = request.getImageBase64();
+				String imageMimeType = request.getImageMimeType();
+				return unslothProvider.get().chatStreaming(history, model, providerConfig, thinking, id, model.getId(), imageBase64, imageMimeType, internet);
+			}
 
  			// Fallback: synchronous response wrapped in a single SSE event
  			ProviderApiService apiService = providerApiServiceFactory.getProvider(provider.getCode());

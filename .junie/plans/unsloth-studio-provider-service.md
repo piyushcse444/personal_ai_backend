@@ -208,7 +208,8 @@ src/main/java/com/personal_ai/backend/
 │       ├── UnslothServerManagerImpl.java     (Unsloth API client)
 │       └── UnslothProviderApiServiceImpl.java (provider API — chat and streaming)
 ├── controller/
-│   └── ConversationController.java            (streaming endpoint)
+│   ├── ConversationController.java            (streaming endpoint)
+│   └── UnslothModelController.java            (model management — unload, list, status, health)
 src/main/resources/
 └── application.yml                            (unsloth config — base-url, api-key, model)
 ```
@@ -253,7 +254,10 @@ Since the Unsloth Studio API requires the service to be running locally, full in
 - **Multi-model support**: Replaced single hardcoded `app.unsloth.model` with a configurable list `app.unsloth.models` in `application.yml`. The service now dynamically resolves the model from the conversation's `Model` entity, supporting multiple models (e.g., LFM3-1.7B and Gemma-4-E4B) with different quantizations. `ensureModelReady()` uses the requested model name instead of a fixed config value. Quant lookup is done from the config map first, falling back to a live `/v1/models` query.
 - **Fully dynamic model resolution**: Removed `app.unsloth.models` config entirely. Model IDs and quantization variants are now discovered from Unsloth's `/v1/models` endpoint at runtime. A cached map (`modelQuantsCache`) is populated during `ensureModelReady()` so `buildChatRequestBody()` can resolve the quant suffix without an extra API call. Adding a new model requires only a database row change — no code or config edits.
 - **Image upload for vision models**: Added `supports_vision` column to the `models` table (V9 migration). The Gemma-4-E4B model is marked as vision-capable. `SendMessageRequest` accepts `imageBase64` and `imageMimeType` fields. When an image is sent, the backend formats the last user message using the multi-content array format (`type: text` + `type: image_url`) compatible with the Unsloth API. The `supportsVision` flag is exposed in `ConversationResponse.ModelInfo` so the frontend can enable/disable the image upload button.
-- **Frontend requirements documented**: The frontend agent needs to (1) add `supportsVision` to model DTO, (2) conditionally show image upload button based on `supportsVision`, (3) encode images as base64 without `data:` prefix, (4) include `imageBase64` and `imageMimeType` in message request, (5) display image thumbnails in chat history, and (6) **lock model selector** once a conversation has messages to prevent mid-conversation model switching.
+- **Frontend requirements documented**: The frontend agent needs to (1) add `supportsVision` to model DTO, (2) conditionally show image upload button based on `supportsVision`, (3) encode images as base64 without `data:` prefix, (4) include `imageBase64` and `imageMimeType` in message request, (5) display image thumbnails in chat history, (6) **lock model selector** once a conversation has messages to prevent mid-conversation model switching, and (7) add an **"Internet Access" toggle** that sends the `internet` boolean in every message request (default `true`).
+- **Model unload API**: Added `UnslothModelController` with endpoints to unload a model (`POST /api/unsloth/models/{modelId}/unload`), list models with load status (`GET /api/unsloth/models`), check inference status (`GET /api/unsloth/status`), and check Unsloth health (`GET /api/unsloth/health`). This allows users with limited VRAM to unload a model before switching to another one. All endpoints require authentication.
+- **Internet access toggle**: Added `internet` boolean field to `SendMessageRequest` DTO. When `true` (default), the model enables tools (`web_search`, `python`, `terminal`). When `false`, all tools are disabled and the model runs in offline mode. The frontend controls this via the `internet` toggle.
+- **Bug fixes**: Fixed duplicate user message bug in `chatStreaming` when an image was sent (the old code added a second user message after updating the last one). Added image support to the non-streaming `chat` method. Added debug logging in `buildChatRequestBody`.
 
 # Delivery Steps
 

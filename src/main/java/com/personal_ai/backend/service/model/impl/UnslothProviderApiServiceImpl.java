@@ -71,6 +71,11 @@ public class UnslothProviderApiServiceImpl implements ProviderApiService {
 
 	@Override
 	public ProviderApiResponse chat(List<Message> messages, Model model, ProviderConfig config, boolean thinking) {
+		return chat(messages, model, config, thinking, true, null, null);
+	}
+
+	public ProviderApiResponse chat(List<Message> messages, Model model, ProviderConfig config, boolean thinking,
+									boolean internet, String imageBase64, String imageMimeType) {
 		ensureModelReady(model.getModelName());
 
 		String chatUrl = baseUrl + "/v1/chat/completions";
@@ -78,7 +83,17 @@ public class UnslothProviderApiServiceImpl implements ProviderApiService {
 				.map(m -> new ChatMessage(m.getRole().name().toLowerCase(), m.getContent(), null, null))
 				.collect(Collectors.toList());
 
-		ObjectNode requestBody = buildChatRequestBody(model.getModelName(), chatMessages, false, thinking, false);
+		// If an image is attached, add it to the last user message
+		if (imageBase64 != null && !imageBase64.isEmpty() && imageMimeType != null && !imageMimeType.isEmpty()) {
+			for (int i = chatMessages.size() - 1; i >= 0; i--) {
+				if ("user".equals(chatMessages.get(i).role())) {
+					chatMessages.set(i, new ChatMessage("user", chatMessages.get(i).content(), imageBase64, imageMimeType));
+					break;
+				}
+			}
+		}
+
+		ObjectNode requestBody = buildChatRequestBody(model.getModelName(), chatMessages, false, thinking, internet);
 
 		try {
 			ChatResponse response = restClient.post()
@@ -115,7 +130,7 @@ public class UnslothProviderApiServiceImpl implements ProviderApiService {
 	 * Thinking content is streamed to the frontend but not persisted.
 	 */
 	public SseEmitter chatStreaming(List<Message> messages, Model model, ProviderConfig config, boolean thinking,
-			UUID conversationId, UUID modelId, String imageBase64, String imageMimeType) {
+			UUID conversationId, UUID modelId, String imageBase64, String imageMimeType, boolean internet) {
 		ensureModelReady(model.getModelName());
 
 		SseEmitter emitter = new SseEmitter(0L);
@@ -127,22 +142,15 @@ public class UnslothProviderApiServiceImpl implements ProviderApiService {
 
 		// If an image is attached, add it to the last user message
 		if (imageBase64 != null && !imageBase64.isEmpty() && imageMimeType != null && !imageMimeType.isEmpty()) {
-			// Find the last user message and append the image to its content
 			for (int i = chatMessages.size() - 1; i >= 0; i--) {
-				ChatMessage msg = chatMessages.get(i);
-				if ("user".equals(msg.role())) {
-					// Update the last user message to include the image
-					chatMessages.set(i, new ChatMessage(msg.role(), msg.content(), imageBase64, imageMimeType));
+				if ("user".equals(chatMessages.get(i).role())) {
+					chatMessages.set(i, new ChatMessage("user", chatMessages.get(i).content(), imageBase64, imageMimeType));
 					break;
 				}
 			}
-			// If no user message found in history (shouldn't happen), add a new one
-			if (imageBase64 != null) {
-				chatMessages.add(new ChatMessage("user", imageBase64 != null && !imageBase64.isEmpty() ? imageBase64 : "", imageBase64, imageMimeType));
-			}
 		}
 
-		ObjectNode requestBody = buildChatRequestBody(model.getModelName(), chatMessages, true, thinking, true);
+		ObjectNode requestBody = buildChatRequestBody(model.getModelName(), chatMessages, true, thinking, internet);
 
 		// Track whether the client is still connected — used to stop streaming early.
 		AtomicBoolean clientConnected = new AtomicBoolean(true);
@@ -392,6 +400,9 @@ public class UnslothProviderApiServiceImpl implements ProviderApiService {
 			toolsArray.add("terminal");
 		}
 		body.set("enabled_tools", toolsArray);
+
+		log.debug("Built chat request body: model={}, stream={}, thinking={}, enableTools={}",
+				modelIdentifier, stream, thinking, enableTools);
 
 		body.put("permission_mode", "off");
 

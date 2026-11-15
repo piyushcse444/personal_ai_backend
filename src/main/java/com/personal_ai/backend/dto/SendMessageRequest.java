@@ -18,4 +18,7 @@ public class SendMessageRequest {
 
 	@Schema(description = "MIME type of the uploaded image, e.g. 'image/png' or 'image/jpeg'. Required if imageBase64 is provided.", example = "image/png")
 	private String imageMimeType;
+
+	@Schema(description = "Enable internet access for the model. When true, the model can use tools like web_search, python, and terminal. When false, all tools are disabled and the model runs in offline mode. Defaults to true.", example = "true")
+	private Boolean internet = true;
 }

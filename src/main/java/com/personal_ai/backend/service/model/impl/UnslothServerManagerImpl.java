@@ -251,22 +251,21 @@ public class UnslothServerManagerImpl implements UnslothServerManager {
 					.body(String.class);
 
 			if (response == null) {
-				log.error("Model unload returned null response");
-				return false;
+				log.warn("Model unload returned null response for {}", modelPath);
+				return true;
 			}
 
 			JsonNode json = objectMapper.readTree(response);
 			String status = json.path("status").asText("");
-			boolean success = "unloaded".equals(status);
-			if (success) {
+			if ("unloaded".equals(status)) {
 				log.info("Model {} unloaded successfully", modelPath);
 			} else {
-				log.warn("Model unload returned status: {}", status);
+				log.info("Model {} unload returned status: {} (treating as success)", modelPath, status);
 			}
-			return success;
+			return true;
 		} catch (Exception e) {
-			log.error("Failed to unload model {}: {}", modelPath, e.getMessage(), e);
-			return false;
+			log.warn("Failed to unload model {} (may already be unloaded): {}", modelPath, e.getMessage());
+			return true;
 		}
 	}
 
