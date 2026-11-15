@@ -75,7 +75,7 @@ public class UnslothProviderApiServiceImpl implements ProviderApiService {
 
 		String chatUrl = baseUrl + "/v1/chat/completions";
 		List<ChatMessage> chatMessages = messages.stream()
-				.map(m -> new ChatMessage(m.getRole().name().toLowerCase(), m.getContent()))
+				.map(m -> new ChatMessage(m.getRole().name().toLowerCase(), m.getContent(), null, null))
 				.collect(Collectors.toList());
 
 		ObjectNode requestBody = buildChatRequestBody(model.getModelName(), chatMessages, false, thinking, false);
@@ -115,15 +115,32 @@ public class UnslothProviderApiServiceImpl implements ProviderApiService {
 	 * Thinking content is streamed to the frontend but not persisted.
 	 */
 	public SseEmitter chatStreaming(List<Message> messages, Model model, ProviderConfig config, boolean thinking,
-			UUID conversationId, UUID modelId) {
+			UUID conversationId, UUID modelId, String imageBase64, String imageMimeType) {
 		ensureModelReady(model.getModelName());
 
 		SseEmitter emitter = new SseEmitter(0L);
 		String chatUrl = baseUrl + "/v1/chat/completions";
 
 		List<ChatMessage> chatMessages = messages.stream()
-				.map(m -> new ChatMessage(m.getRole().name().toLowerCase(), m.getContent()))
+				.map(m -> new ChatMessage(m.getRole().name().toLowerCase(), m.getContent(), null, null))
 				.collect(Collectors.toList());
+
+		// If an image is attached, add it to the last user message
+		if (imageBase64 != null && !imageBase64.isEmpty() && imageMimeType != null && !imageMimeType.isEmpty()) {
+			// Find the last user message and append the image to its content
+			for (int i = chatMessages.size() - 1; i >= 0; i--) {
+				ChatMessage msg = chatMessages.get(i);
+				if ("user".equals(msg.role())) {
+					// Update the last user message to include the image
+					chatMessages.set(i, new ChatMessage(msg.role(), msg.content(), imageBase64, imageMimeType));
+					break;
+				}
+			}
+			// If no user message found in history (shouldn't happen), add a new one
+			if (imageBase64 != null) {
+				chatMessages.add(new ChatMessage("user", imageBase64 != null && !imageBase64.isEmpty() ? imageBase64 : "", imageBase64, imageMimeType));
+			}
+		}
 
 		ObjectNode requestBody = buildChatRequestBody(model.getModelName(), chatMessages, true, thinking, true);
 
@@ -322,8 +339,37 @@ public class UnslothProviderApiServiceImpl implements ProviderApiService {
 		}
 		body.put("model", modelIdentifier);
 
-		// Messages
-		JsonNode messagesArray = objectMapper.valueToTree(chatMessages);
+		// Messages - build manually to support multi-content (text + image) format
+		ArrayNode messagesArray = objectMapper.createArrayNode();
+		for (ChatMessage msg : chatMessages) {
+			ObjectNode msgNode = objectMapper.createObjectNode();
+			msgNode.put("role", msg.role());
+
+			// If the message has an image, use the multi-content array format
+			if (msg.imageBase64() != null && !msg.imageBase64().isEmpty()) {
+				ArrayNode contentArray = objectMapper.createArrayNode();
+				// Add text part if present
+				if (msg.content() != null && !msg.content().isEmpty()) {
+					ObjectNode textPart = objectMapper.createObjectNode();
+					textPart.put("type", "text");
+					textPart.put("text", msg.content());
+					contentArray.add(textPart);
+				}
+				// Add image part
+				ObjectNode imagePart = objectMapper.createObjectNode();
+				imagePart.put("type", "image_url");
+				ObjectNode imageUrlNode = objectMapper.createObjectNode();
+				String mimeType = msg.imageMimeType() != null ? msg.imageMimeType() : "image/png";
+				imageUrlNode.put("url", "data:" + mimeType + ";base64," + msg.imageBase64());
+				imagePart.set("image_url", imageUrlNode);
+				contentArray.add(imagePart);
+				msgNode.set("content", contentArray);
+			} else {
+				// Simple text-only message
+				msgNode.put("content", msg.content() != null ? msg.content() : "");
+			}
+			messagesArray.add(msgNode);
+		}
 		body.set("messages", messagesArray);
 
 		// Generation parameters
@@ -364,7 +410,8 @@ public class UnslothProviderApiServiceImpl implements ProviderApiService {
 	}
 
 	// Request/Response records for the OpenAI-compatible API
-	private record ChatMessage(String role, String content) {}
+	// imageBase64 and imageMimeType are used for vision models (e.g., Gemma-4-E4B)
+	private record ChatMessage(String role, String content, String imageBase64, String imageMimeType) {}
 
 	private record ChatResponse(
 			List<ChatChoice> choices,

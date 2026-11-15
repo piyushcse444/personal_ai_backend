@@ -877,6 +877,7 @@ The `unsloth` provider communicates with the Unsloth Studio API (running on port
 - **SSE streaming**: Use `POST /api/conversations/{id}/messages/stream` for real-time token streaming with thinking visibility.
 - **No provider config needed**: The `providerConfigId` is optional when creating a conversation with the Unsloth model.
 - **Multi-model support**: The backend supports any number of models — no model list in config. Models are discovered from Unsloth's `/v1/models` endpoint at runtime. The model is resolved from the conversation's `Model` entity — `ensureModelReady()` loads whichever model the conversation uses. Quantization variants are cached from the API response for fast lookup.
+- **Vision model support**: The `models` table has a `supports_vision` column (added in V9 migration). Models like Gemma-4-E4B are marked as vision-capable. The frontend checks `supportsVision` in the model info to enable/disable the image upload button. When an image is sent, the request body includes `imageBase64` and `imageMimeType`, and the backend formats the message using the multi-content array format (`type: text` + `type: image_url`).
 - **Requirements**: Unsloth Studio must be running on the configured port, and the model must be available in Unsloth.
 
 ### Model Loading Flow
@@ -911,7 +912,7 @@ The Llama.cpp provider sends a structured JSON request to the Unsloth API with t
 | Field | Value | Description |
 |-------|-------|-------------|
 | `model` | `model_path:quant` (e.g., `AtomicChat/LFM3-1.7B-Uncensored-GGUF:Q4_K_M`) | Model identifier with quant suffix |
-| `messages` | Array of `{role, content}` | Full conversation history |
+| `messages` | Array of `{role, content}` | Full conversation history (content can be a string or an array of objects for vision models) |
 | `temperature` | `0.7` | Sampling temperature |
 | `top_p` | `0.8` | Nucleus sampling threshold |
 | `top_k` | `20` | Top-k sampling |
@@ -933,6 +934,27 @@ When `enable_tools` is `true`, the following tools are available to the LLM:
 3. **`terminal`** — Allows the model to execute terminal commands.
 
 These tools are managed by the Unsloth Studio backend, not by the Java application.
+
+### Vision Model Image Upload
+
+For models that support vision (e.g., `HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive`), the `content` field in a message can be an array of objects instead of a plain string:
+
+```json
+{
+  "role": "user",
+  "content": [
+    {"type": "text", "text": "Describe this image."},
+    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,<BASE64_DATA>"}}
+  ]
+}
+```
+
+The frontend sends the image via `SendMessageRequest` with `imageBase64` (base64-encoded image data) and `imageMimeType` (e.g., `image/png`, `image/jpeg`). The backend attaches the image to the last user message in the conversation history before sending it to the Unsloth API.
+
+The `supportsVision` flag is exposed in:
+- `GET /api/models` — returns the `Model` entity with `supportsVision` field
+- `GET /api/conversations/{id}` — returns `ConversationResponse` with `model.supportsVision` flag
+- The frontend uses this flag to show/hide the image upload button
 
 ---
 
@@ -959,6 +981,8 @@ The response includes `Access-Control-Allow-Origin` headers matching the request
 - **HikariCP pool tuning**: Added explicit HikariCP configuration to `application.yml` (`maximum-pool-size: 20`, `minimum-idle: 5`, `connection-timeout: 20000`, `max-lifetime: 1200000`) for more predictable connection pool behavior.
 - **Multi-model support**: Replaced single hardcoded `app.unsloth.model` with a configurable list `app.unsloth.models`. The service dynamically resolves the model from the conversation's `Model` entity, supporting multiple models (e.g., LFM3-1.7B and Gemma-4-E4B) with different quantizations. Quant lookup is done from the config map first, falling back to a live `/v1/models` query.
 - **Fully dynamic model resolution**: Removed `app.unsloth.models` config entirely. Model IDs and quantization variants are now discovered from Unsloth's `/v1/models` endpoint at runtime. A cached map (`modelQuantsCache`) is populated during `ensureModelReady()` so `buildChatRequestBody()` can resolve the quant suffix without an extra API call. Adding a new model requires only a database row change — no code or config edits.
+- **Image upload for vision models**: Added `supports_vision` column to the `models` table (V9 migration). The Gemma-4-E4B model is marked as vision-capable. `SendMessageRequest` accepts `imageBase64` and `imageMimeType` fields. When an image is sent, the backend formats the last user message using the multi-content array format (`type: text` + `type: image_url`) compatible with the Unsloth API. The `supportsVision` flag is exposed in `ConversationResponse.ModelInfo` so the frontend can enable/disable the image upload button.
+- **Frontend requirements**: The frontend must (1) add `supportsVision` to model DTO, (2) conditionally show image upload button based on `supportsVision`, (3) encode images as base64 without `data:` prefix, (4) include `imageBase64` and `imageMimeType` in message request, (5) display image thumbnails in chat history, and (6) **lock model selector** once a conversation has messages to prevent mid-conversation model switching.
 
 ---
 
@@ -971,3 +995,4 @@ Flyway migrations in `src/main/resources/db/migration/`:
 - `V5__add_llamacpp_provider_and_model.sql` — Added Unsloth provider and LFM3-1.7B model
 - `V8__rename_llamacpp_to_unsloth.sql` — Renamed provider code from "llamacpp" to "unsloth", added Gemma-4-E4B model
 - `V7__create_archive_tables.sql` — Created `archive_conversation` and `archive_message` tables for preserving chat history
+- `V9__add_supports_vision_to_models.sql` — Added `supports_vision` column to models table; marked Gemma-4-E4B as vision-capable

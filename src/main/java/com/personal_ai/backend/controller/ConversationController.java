@@ -291,8 +291,16 @@ public class ConversationController {
 			ProviderConfig providerConfig = conversation.getProviderConfig();
 			Provider provider = conversation.getProvider();
 
-			// Save user message
-			messageService.createMessage(id, "USER", request.getContent(), null, model.getId());
+			// Save user message (include image indicator if an image was uploaded)
+			String userContent = request.getContent();
+			if (request.getImageBase64() != null && !request.getImageBase64().isEmpty()) {
+				// Prepend an image indicator so the chat history shows an image was sent
+				String prefix = "[Image uploaded]";
+				userContent = (userContent != null && !userContent.isEmpty())
+						? prefix + " " + userContent
+						: prefix;
+			}
+			messageService.createMessage(id, "USER", userContent, null, model.getId());
 
 			// Get conversation history for context
 			List<Message> history = messageService.findByConversationIdOrderByCreatedAtAsc(id);
@@ -300,7 +308,9 @@ public class ConversationController {
   		// Use streaming for unsloth provider, fallback to sync for others
  			boolean thinking = request.getThinking() != null && request.getThinking();
  			if ("unsloth".equalsIgnoreCase(provider.getCode()) && unslothProvider.isPresent()) {
- 				return unslothProvider.get().chatStreaming(history, model, providerConfig, thinking, id, model.getId());
+ 				String imageBase64 = request.getImageBase64();
+ 				String imageMimeType = request.getImageMimeType();
+ 				return unslothProvider.get().chatStreaming(history, model, providerConfig, thinking, id, model.getId(), imageBase64, imageMimeType);
  			}
 
  			// Fallback: synchronous response wrapped in a single SSE event
@@ -356,6 +366,7 @@ public class ConversationController {
 				.id(model != null ? model.getId() : null)
 				.modelName(model != null ? model.getModelName() : null)
 				.displayName(model != null ? model.getDisplayName() : null)
+				.supportsVision(model != null ? model.getSupportsVision() : false)
 				.build();
 
 		return ConversationResponse.builder()

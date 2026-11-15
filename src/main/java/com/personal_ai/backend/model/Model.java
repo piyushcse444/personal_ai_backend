@@ -44,6 +44,10 @@ public class Model {
     @Builder.Default
     private Boolean isOffline = false;
 
+    @Column(name = "supports_vision", nullable = false)
+    @Builder.Default
+    private Boolean supportsVision = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 

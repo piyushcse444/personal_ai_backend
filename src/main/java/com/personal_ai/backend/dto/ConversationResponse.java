@@ -27,5 +27,6 @@ public class ConversationResponse {
 		private UUID id;
 		private String modelName;
 		private String displayName;
+		private Boolean supportsVision;
 	}
 }
