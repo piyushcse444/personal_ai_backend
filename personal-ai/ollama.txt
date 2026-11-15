@@ -1,0 +1,12 @@
+1) /set nothink
+2) ollama run qwen3.5:0.8b
+3) /set parameter num_ctx 8192
+4) ollama list
+**5) unsloth studio -p 8888
+
+
+
+
+list of models :-
+
+1)  llama serve -hf AtomicChat/LFM3-1.7B-Uncensored-GGUF:Q4_K_M -> unsensored in every way

@@ -1,4 +1,4 @@
-package com.personal_ai.backend.service;
+package com.personal_ai.backend.service.provider;
 
 import com.personal_ai.backend.model.ProviderConfig;
 

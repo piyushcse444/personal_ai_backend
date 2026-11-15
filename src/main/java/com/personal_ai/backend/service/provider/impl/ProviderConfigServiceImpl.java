@@ -1,4 +1,4 @@
-package com.personal_ai.backend.service.impl;
+package com.personal_ai.backend.service.provider.impl;
 
 import com.personal_ai.backend.model.Provider;
 import com.personal_ai.backend.model.ProviderConfig;
@@ -6,7 +6,7 @@ import com.personal_ai.backend.model.User;
 import com.personal_ai.backend.repository.ProviderConfigRepository;
 import com.personal_ai.backend.repository.ProviderRepository;
 import com.personal_ai.backend.repository.UserRepository;
-import com.personal_ai.backend.service.ProviderConfigService;
+import com.personal_ai.backend.service.provider.ProviderConfigService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 

@@ -1,4 +1,4 @@
-package com.personal_ai.backend.service;
+package com.personal_ai.backend.service.provider;
 
 import com.personal_ai.backend.dto.ProviderApiResponse;
 import com.personal_ai.backend.model.Message;
@@ -15,7 +15,8 @@ public interface ProviderApiService {
 	 * @param messages the conversation history
 	 * @param model the model to use
 	 * @param config the provider config with credentials and endpoint
+	 * @param thinking whether to enable thinking/reasoning mode (for reasoning-capable models)
 	 * @return the API response with content and token counts
 	 */
-	ProviderApiResponse chat(List<Message> messages, Model model, ProviderConfig config);
+	ProviderApiResponse chat(List<Message> messages, Model model, ProviderConfig config, boolean thinking);
 }

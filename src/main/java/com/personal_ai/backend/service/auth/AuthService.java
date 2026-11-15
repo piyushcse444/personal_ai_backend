@@ -1,4 +1,4 @@
-package com.personal_ai.backend.service;
+package com.personal_ai.backend.service.auth;
 
 import java.util.Map;
 import java.util.UUID;

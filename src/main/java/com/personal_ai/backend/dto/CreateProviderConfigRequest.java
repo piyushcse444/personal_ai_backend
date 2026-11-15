@@ -15,7 +15,6 @@ public class CreateProviderConfigRequest {
 	@NotBlank(message = "Config name is required")
 	private String configName;
 
-	@NotBlank(message = "API key is required")
 	private String apiKey;
 
 	private String endpointUrl;

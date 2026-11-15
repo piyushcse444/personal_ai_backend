@@ -1,4 +1,4 @@
-package com.personal_ai.backend.service.impl;
+package com.personal_ai.backend.service.conversation.impl;
 
 import com.personal_ai.backend.model.Conversation;
 import com.personal_ai.backend.model.Model;
@@ -10,8 +10,8 @@ import com.personal_ai.backend.repository.ModelRepository;
 import com.personal_ai.backend.repository.ProviderConfigRepository;
 import com.personal_ai.backend.repository.ProviderRepository;
 import com.personal_ai.backend.repository.UserRepository;
-import com.personal_ai.backend.service.ConversationService;
-import org.springframework.data.domain.PageRequest;
+import com.personal_ai.backend.service.archive.ArchiveService;
+import com.personal_ai.backend.service.conversation.ConversationService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,17 +28,20 @@ public class ConversationServiceImpl implements ConversationService {
     private final ProviderRepository providerRepository;
     private final ModelRepository modelRepository;
     private final ProviderConfigRepository providerConfigRepository;
+    private final ArchiveService archiveService;
 
     public ConversationServiceImpl(ConversationRepository conversationRepository,
                                    UserRepository userRepository,
                                    ProviderRepository providerRepository,
                                    ModelRepository modelRepository,
-                                   ProviderConfigRepository providerConfigRepository) {
+                                   ProviderConfigRepository providerConfigRepository,
+                                   ArchiveService archiveService) {
         this.conversationRepository = conversationRepository;
         this.userRepository = userRepository;
         this.providerRepository = providerRepository;
         this.modelRepository = modelRepository;
         this.providerConfigRepository = providerConfigRepository;
+        this.archiveService = archiveService;
     }
 
     @Override
@@ -98,6 +101,54 @@ public class ConversationServiceImpl implements ConversationService {
                 .provider(provider)
                 .model(model)
                 .providerConfig(config)
+                .title((title != null && !title.isBlank()) ? title.trim() : "New conversation")
+                .build();
+
+        return conversationRepository.save(conversation);
+    }
+
+    @Override
+    public Conversation createConversation(UUID userId, UUID providerId, UUID modelId, String title) {
+        // For offline models, no provider config is needed
+        if (!userRepository.existsById(userId)) {
+            throw new IllegalArgumentException("User not found: " + userId);
+        }
+
+        if (!providerRepository.existsById(providerId)) {
+            throw new IllegalArgumentException("Provider not found: " + providerId);
+        }
+
+        Provider provider = providerRepository.findById(providerId)
+                .orElseThrow(() -> new IllegalArgumentException("Provider not found: " + providerId));
+
+        if (!provider.getIsActive()) {
+            throw new IllegalStateException("Provider is not active: " + providerId);
+        }
+
+        if (!modelRepository.existsById(modelId)) {
+            throw new IllegalArgumentException("Model not found: " + modelId);
+        }
+
+        Model model = modelRepository.findById(modelId)
+                .orElseThrow(() -> new IllegalArgumentException("Model not found: " + modelId));
+
+        if (!model.getProvider().getId().equals(providerId)) {
+            throw new IllegalArgumentException("Model does not belong to the specified provider");
+        }
+
+        if (!model.getIsActive()) {
+            throw new IllegalStateException("Model is not active: " + modelId);
+        }
+
+        // Use lightweight entity references instead of full entities
+        User user = new User();
+        user.setId(userId);
+
+        Conversation conversation = Conversation.builder()
+                .user(user)
+                .provider(provider)
+                .model(model)
+                .providerConfig(null)
                 .title((title != null && !title.isBlank()) ? title.trim() : "New conversation")
                 .build();
 
@@ -171,6 +222,8 @@ public class ConversationServiceImpl implements ConversationService {
         if (!conversationRepository.existsById(id)) {
             throw new IllegalArgumentException("Conversation not found: " + id);
         }
+        // Archive the conversation and its messages before deleting
+        archiveService.archiveConversation(id);
         conversationRepository.deleteById(id);
     }
 }

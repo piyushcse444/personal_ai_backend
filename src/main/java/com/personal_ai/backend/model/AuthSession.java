@@ -10,7 +10,8 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "auth_sessions")
-@Data
+@Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor

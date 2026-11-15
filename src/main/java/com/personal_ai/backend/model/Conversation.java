@@ -22,7 +22,8 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "conversations")
-@Data
+@Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
@@ -52,7 +53,7 @@ public class Conversation {
     private Model model;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "provider_config_id", nullable = false)
+    @JoinColumn(name = "provider_config_id")
     @JsonIgnore
     private ProviderConfig providerConfig;
 

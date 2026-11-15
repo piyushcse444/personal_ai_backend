@@ -1,6 +1,7 @@
-package com.personal_ai.backend.service;
+package com.personal_ai.backend.service.provider;
 
-import com.personal_ai.backend.service.impl.*;
+import com.personal_ai.backend.service.model.impl.GoogleProviderApiServiceImpl;
+import com.personal_ai.backend.service.model.impl.LlamaCppProviderApiServiceImpl;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
@@ -14,11 +15,7 @@ public class ProviderApiServiceFactory {
 
 	public ProviderApiServiceFactory(Optional<LlamaCppProviderApiServiceImpl> llamaCppProvider) {
 		this.providers = new HashMap<>();
-		providers.put("openai", new OpenAiProviderApiServiceImpl());
-		providers.put("anthropic", new AnthropicProviderApiServiceImpl());
 		providers.put("google", new GoogleProviderApiServiceImpl());
-		providers.put("mistral", new MistralProviderApiServiceImpl());
-		providers.put("ollama", new OllamaProviderApiServiceImpl());
 		llamaCppProvider.ifPresent(p -> providers.put("llamacpp", p));
 	}
 

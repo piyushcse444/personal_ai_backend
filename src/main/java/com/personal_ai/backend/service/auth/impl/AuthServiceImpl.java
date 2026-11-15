@@ -1,11 +1,11 @@
-package com.personal_ai.backend.service.impl;
+package com.personal_ai.backend.service.auth.impl;
 
 import com.personal_ai.backend.model.AuthSession;
 import com.personal_ai.backend.model.User;
-import com.personal_ai.backend.service.AuthService;
-import com.personal_ai.backend.service.AuthSessionService;
-import com.personal_ai.backend.service.JwtService;
-import com.personal_ai.backend.service.UserService;
+import com.personal_ai.backend.service.auth.AuthService;
+import com.personal_ai.backend.service.auth.AuthSessionService;
+import com.personal_ai.backend.service.auth.JwtService;
+import com.personal_ai.backend.service.auth.UserService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

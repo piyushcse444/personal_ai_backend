@@ -5,7 +5,9 @@ import com.personal_ai.backend.dto.ProviderConfigResponse;
 import com.personal_ai.backend.dto.UpdateProviderConfigRequest;
 import com.personal_ai.backend.model.Provider;
 import com.personal_ai.backend.model.ProviderConfig;
-import com.personal_ai.backend.service.ProviderConfigService;
+import com.personal_ai.backend.service.provider.ProviderConfigService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -19,6 +21,7 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/provider-configs")
+@Tag(name = "Provider Configuration", description = "AI provider configuration management APIs")
 public class ProviderConfigController {
 
 	private final ProviderConfigService providerConfigService;
@@ -28,19 +31,25 @@ public class ProviderConfigController {
 	}
 
 	@PostMapping
+	@Operation(summary = "Create provider config", description = "Create a new provider configuration with API credentials")
 	public ResponseEntity<?> createConfig(@Valid @RequestBody CreateProviderConfigRequest request) {
 		try {
 			String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
 			UUID userId = UUID.fromString(userIdStr);
 
-			byte[] credentialCiphertext = request.getApiKey().getBytes(StandardCharsets.UTF_8);
+			byte[] credentialCiphertext = null;
+			String credentialKeyVersion = null;
+			if (request.getApiKey() != null && !request.getApiKey().isBlank()) {
+				credentialCiphertext = request.getApiKey().getBytes(StandardCharsets.UTF_8);
+				credentialKeyVersion = "v1";
+			}
 
 			ProviderConfig config = providerConfigService.createConfig(
 					userId,
 					request.getProviderId(),
 					request.getConfigName(),
 					credentialCiphertext,
-					"v1",
+					credentialKeyVersion,
 					request.getEndpointUrl()
 			);
 
@@ -54,6 +63,7 @@ public class ProviderConfigController {
 	}
 
 	@GetMapping
+	@Operation(summary = "List provider configs", description = "List all provider configurations for the authenticated user, optionally filtered by provider ID")
 	public ResponseEntity<List<ProviderConfigResponse>> listConfigs(
 			@RequestParam(required = false) UUID providerId) {
 		try {
@@ -77,6 +87,7 @@ public class ProviderConfigController {
 	}
 
 	@GetMapping("/{id}")
+	@Operation(summary = "Get provider config", description = "Retrieve a specific provider configuration by ID")
 	public ResponseEntity<?> getConfig(@PathVariable UUID id) {
 		try {
 			String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
@@ -94,6 +105,7 @@ public class ProviderConfigController {
 	}
 
 	@PatchMapping("/{id}")
+	@Operation(summary = "Update provider config", description = "Update an existing provider configuration's name, credentials, or status")
 	public ResponseEntity<?> updateConfig(@PathVariable UUID id, @Valid @RequestBody UpdateProviderConfigRequest request) {
 		try {
 			String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
@@ -129,6 +141,7 @@ public class ProviderConfigController {
 	}
 
 	@DeleteMapping("/{id}")
+	@Operation(summary = "Delete provider config", description = "Permanently delete a provider configuration")
 	public ResponseEntity<?> deleteConfig(@PathVariable UUID id) {
 		try {
 			String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
@@ -153,6 +166,7 @@ public class ProviderConfigController {
 	}
 
 	@PostMapping("/{id}/test")
+	@Operation(summary = "Test provider config", description = "Test the connectivity of a provider configuration to verify it works")
 	public ResponseEntity<?> testConfig(@PathVariable UUID id) {
 		try {
 			String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();

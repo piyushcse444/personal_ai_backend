@@ -1,4 +1,4 @@
-package com.personal_ai.backend.service.impl;
+package com.personal_ai.backend.service.conversation.impl;
 
 import com.personal_ai.backend.model.Conversation;
 import com.personal_ai.backend.model.Message;
@@ -6,7 +6,7 @@ import com.personal_ai.backend.model.Model;
 import com.personal_ai.backend.repository.ConversationRepository;
 import com.personal_ai.backend.repository.MessageRepository;
 import com.personal_ai.backend.repository.ModelRepository;
-import com.personal_ai.backend.service.MessageService;
+import com.personal_ai.backend.service.conversation.MessageService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,10 +32,6 @@ public class MessageServiceImpl implements MessageService {
 
     @Override
     public Message createMessage(UUID conversationId, String role, String content, Integer tokenCount, UUID modelId) {
-        if (!conversationRepository.existsById(conversationId)) {
-            throw new IllegalArgumentException("Conversation not found: " + conversationId);
-        }
-
         Message.Role messageRole;
         try {
             messageRole = Message.Role.valueOf(role.toUpperCase());
@@ -51,15 +47,14 @@ public class MessageServiceImpl implements MessageService {
             throw new IllegalArgumentException("Token count cannot be negative");
         }
 
-        // Use lightweight entity references instead of loading full entities
+        // Use lightweight entity references instead of loading full entities.
+        // Let the database foreign key constraint validate existence — this avoids race conditions
+        // where the conversation/model is deleted between the existsById check and the save().
         Conversation conversation = new Conversation();
         conversation.setId(conversationId);
 
         Model model = null;
         if (modelId != null) {
-            if (!modelRepository.existsById(modelId)) {
-                throw new IllegalArgumentException("Model not found: " + modelId);
-            }
             model = new Model();
             model.setId(modelId);
         }

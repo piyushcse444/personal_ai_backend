@@ -1,6 +1,6 @@
 package com.personal_ai.backend.config;
 
-import com.personal_ai.backend.service.JwtService;
+import com.personal_ai.backend.service.auth.JwtService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;

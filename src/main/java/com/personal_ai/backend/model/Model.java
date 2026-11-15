@@ -10,7 +10,8 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "models")
-@Data
+@Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
@@ -38,6 +39,10 @@ public class Model {
     @Column(name = "is_active", nullable = false)
     @Builder.Default
     private Boolean isActive = true;
+
+    @Column(name = "is_offline", nullable = false)
+    @Builder.Default
+    private Boolean isOffline = false;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;

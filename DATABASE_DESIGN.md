@@ -233,6 +233,7 @@ Catalog of models made available by providers. `context_window` is the maximum i
 | `model_name` | `text` | NOT NULL | Exact API model identifier; unique within provider. |
 | `display_name` | `text` | NOT NULL | UI name. |
 | `context_window` | `integer` | NOT NULL | Positive token capacity. Keep configurable and refresh from trusted provider catalog data. |
+| `is_offline` | `boolean` | NOT NULL, `false` | Whether the model runs locally without an API key (e.g., Ollama, Llama.cpp). Added in migration `V4__add_is_offline_to_models.sql`. |
 | `is_active` | `boolean` | NOT NULL, `true` | Whether selectable for new conversations. |
 | `created_at`, `updated_at` | `timestamptz` | NOT NULL, `now()` | Catalog timestamps. |
 
@@ -263,7 +264,7 @@ Stores a user's chat and its selected model/config. Each row references one user
 | `provider_id` | `uuid` | NOT NULL | Consistency key; must match both model and config provider via composite FKs. |
 | `title` | `text` | NOT NULL, `New conversation` | User-visible title; nonempty after trimming. |
 | `model_id` | `uuid` | NOT NULL, composite FK to models | Selected model. |
-| `provider_config_id` | `uuid` | NOT NULL, composite FKs to provider_configs | Selected credential/settings. |
+| `provider_config_id` | `uuid` | NULL for offline models, otherwise NOT NULL | Selected credential/settings. For offline models (e.g., Llama.cpp), this column is `NULL` since no provider config is needed. |
 | `created_at`, `updated_at` | `timestamptz` | NOT NULL, `now()` | Creation and last activity/update timestamps. |
 
 ### `messages`
@@ -409,6 +410,18 @@ The schema makes explicit defaults so implementation can proceed, but confirm th
 7. **Conversation selection policy:** This design requires one current model/config pair on each conversation. If users should switch provider mid-conversation without changing a single current selection, messages can retain model IDs, but a per-turn config reference would require a schema change.
 8. **Catalog ownership:** This assumes shared provider/model catalog rows managed by the application, with only credentials/configs user-owned.
 
-## 11. Phase 1 boundary
+## 11. Flyway Migrations
+
+The database schema is managed via Flyway migrations in `src/main/resources/db/migration/`:
+
+| Migration | Description |
+|-----------|-------------|
+| `V1__init_schema.sql` | Creates the 7 core tables: users, auth_sessions, providers, models, provider_configs, conversations, messages |
+| `V2__seed_providers_and_models.sql` | Seeds 5 providers (OpenAI, Anthropic, Google AI, Mistral AI, Ollama) and their models |
+| `V3__add_qwen3_models.sql` | Adds Qwen3 models to the Ollama provider |
+| `V4__add_is_offline_to_models.sql` | Adds the `is_offline` boolean column to the `models` table |
+| `V5__add_llamacpp_provider_and_model.sql` | Seeds the Llama.cpp local provider and the `LFM3-1.7B Uncensored (Offline)` model with `is_offline=true` and `context_window=8192` |
+
+## 12. Phase 1 boundary
 
 Only the seven tables defined here are in Phase 1. Future retrieval-augmented generation, embeddings, long-term memory, tool executions, attachments, and detailed provider billing may require additional tables and migrations; they are intentionally excluded from this design.

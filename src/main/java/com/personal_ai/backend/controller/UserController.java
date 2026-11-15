@@ -4,8 +4,10 @@ import com.personal_ai.backend.dto.LoginRequest;
 import com.personal_ai.backend.dto.SignupRequest;
 import com.personal_ai.backend.dto.UpdateUserRequest;
 import com.personal_ai.backend.model.User;
-import com.personal_ai.backend.service.AuthService;
-import com.personal_ai.backend.service.UserService;
+import com.personal_ai.backend.service.auth.AuthService;
+import com.personal_ai.backend.service.auth.UserService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -16,6 +18,7 @@ import java.util.Map;
 import java.util.UUID;
 
 @RestController
+@Tag(name = "User", description = "User registration, login, and profile management APIs")
 public class UserController {
 
     private final UserService userService;
@@ -27,6 +30,7 @@ public class UserController {
     }
 
     @PostMapping("/api/auth/signup")
+    @Operation(summary = "Sign up", description = "Register a new user account with email, display name, and password")
     public ResponseEntity<Map<String, Object>> signup(@Valid @RequestBody SignupRequest request) {
         try {
             User user = userService.signup(request.getEmail(), request.getDisplayName(), request.getPassword());
@@ -47,6 +51,7 @@ public class UserController {
     }
 
     @PostMapping("/api/auth/login")
+    @Operation(summary = "Login", description = "Authenticate a user and receive JWT access and refresh tokens")
     public ResponseEntity<Map<String, Object>> login(@Valid @RequestBody LoginRequest request) {
         try {
             Map<String, Object> result = authService.login(request.getEmail(), request.getPassword());
@@ -60,6 +65,7 @@ public class UserController {
     }
 
     @GetMapping("/api/users/me")
+    @Operation(summary = "Get current user", description = "Retrieve the authenticated user's profile information")
     public ResponseEntity<Map<String, Object>> getCurrentUser() {
         try {
             String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
@@ -82,6 +88,7 @@ public class UserController {
     }
 
     @PatchMapping("/api/users/me")
+    @Operation(summary = "Update current user", description = "Update the authenticated user's profile information")
     public ResponseEntity<Map<String, Object>> updateCurrentUser(@Valid @RequestBody UpdateUserRequest request) {
         try {
             String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
@@ -105,6 +112,7 @@ public class UserController {
     }
 
     @DeleteMapping("/api/users/me")
+    @Operation(summary = "Delete current user", description = "Permanently delete the authenticated user's account")
     public ResponseEntity<Map<String, Object>> deleteCurrentUser() {
         try {
             String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();

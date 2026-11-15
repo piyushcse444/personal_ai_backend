@@ -6,16 +6,22 @@ import com.personal_ai.backend.model.Message;
 import com.personal_ai.backend.model.Model;
 import com.personal_ai.backend.model.Provider;
 import com.personal_ai.backend.model.ProviderConfig;
-import com.personal_ai.backend.service.ConversationService;
-import com.personal_ai.backend.service.MessageService;
-import com.personal_ai.backend.service.ProviderApiService;
-import com.personal_ai.backend.service.ProviderApiServiceFactory;
-import com.personal_ai.backend.service.ProviderConfigService;
+import com.personal_ai.backend.service.conversation.ConversationService;
+import com.personal_ai.backend.service.conversation.MessageService;
+import com.personal_ai.backend.service.provider.ProviderApiService;
+import com.personal_ai.backend.service.provider.ProviderApiServiceFactory;
+import com.personal_ai.backend.service.provider.ProviderConfigService;
+import com.personal_ai.backend.service.model.ModelService;
+import com.personal_ai.backend.service.model.impl.LlamaCppProviderApiServiceImpl;
 import com.personal_ai.backend.repository.ConversationRepository;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Map;
@@ -24,6 +30,7 @@ import java.util.stream.Collectors;
 import java.time.LocalDateTime;
 @RestController
 @RequestMapping("/api/conversations")
+@Tag(name = "Conversation", description = "Conversation and message management APIs")
 public class ConversationController {
 
 	private final ConversationService conversationService;
@@ -31,37 +38,61 @@ public class ConversationController {
 	private final ProviderConfigService providerConfigService;
 	private final ProviderApiServiceFactory providerApiServiceFactory;
 	private final ConversationRepository conversationRepository;
+	private final ModelService modelService;
+	private final java.util.Optional<LlamaCppProviderApiServiceImpl> llamaCppProvider;
 
 	public ConversationController(ConversationService conversationService, MessageService messageService,
 								ProviderConfigService providerConfigService,
 								ProviderApiServiceFactory providerApiServiceFactory,
-								ConversationRepository conversationRepository) {
+								ConversationRepository conversationRepository,
+								ModelService modelService,
+								java.util.Optional<LlamaCppProviderApiServiceImpl> llamaCppProvider) {
 		this.conversationService = conversationService;
 		this.messageService = messageService;
 		this.providerConfigService = providerConfigService;
 		this.providerApiServiceFactory = providerApiServiceFactory;
 		this.conversationRepository = conversationRepository;
+		this.modelService = modelService;
+		this.llamaCppProvider = llamaCppProvider;
 	}
 
 	@PostMapping
+	@Operation(summary = "Create conversation", description = "Create a new conversation with a specified AI model and optional provider configuration (not required for offline models)")
 	public ResponseEntity<?> createConversation(@Valid @RequestBody CreateConversationRequest request) {
 		try {
 			String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
 			UUID userId = UUID.fromString(userIdStr);
 
-			// Get the provider config to find the provider ID
-			var configOpt = providerConfigService.findById(request.getProviderConfigId());
-			UUID providerId = configOpt.map(c -> c.getProvider().getId()).orElse(null);
+			UUID providerConfigId = request.getProviderConfigId();
 
-			Conversation conversation = conversationService.createConversation(
-					userId,
-					providerId,
-					request.getModelId(),
-					request.getProviderConfigId(),
-					request.getTitle()
-			);
+			if (providerConfigId != null) {
+				// Online model: provider config is required
+				var configOpt = providerConfigService.findById(providerConfigId);
+				UUID providerId = configOpt.map(c -> c.getProvider().getId()).orElse(null);
 
-			return ResponseEntity.status(201).body(toResponse(conversation));
+				Conversation conversation = conversationService.createConversation(
+						userId,
+						providerId,
+						request.getModelId(),
+						providerConfigId,
+						request.getTitle()
+				);
+
+				return ResponseEntity.status(201).body(toResponse(conversation));
+			} else {
+				// Offline model: no provider config needed; get provider from the model
+				var modelOpt = modelService.findById(request.getModelId());
+				UUID providerId = modelOpt.map(m -> m.getProvider().getId()).orElse(null);
+
+				Conversation conversation = conversationService.createConversation(
+						userId,
+						providerId,
+						request.getModelId(),
+						request.getTitle()
+				);
+
+				return ResponseEntity.status(201).body(toResponse(conversation));
+			}
 		} catch (IllegalArgumentException e) {
 			return ResponseEntity.badRequest().body(Map.of(
 					"success", false,
@@ -71,6 +102,7 @@ public class ConversationController {
 	}
 
 	@GetMapping
+	@Operation(summary = "List conversations", description = "List all conversations for the authenticated user, optionally filtered by search query")
 	public ResponseEntity<List<ConversationResponse>> listConversations(
 			@RequestParam(required = false) String search) {
 		try {
@@ -94,6 +126,7 @@ public class ConversationController {
 	}
 
 	@GetMapping("/{id}")
+	@Operation(summary = "Get conversation", description = "Retrieve a specific conversation by ID")
 	public ResponseEntity<?> getConversation(@PathVariable UUID id) {
 		try {
 			String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
@@ -111,6 +144,7 @@ public class ConversationController {
 	}
 
 	@PatchMapping("/{id}")
+	@Operation(summary = "Update conversation", description = "Update an existing conversation's title, model, or provider configuration")
 	public ResponseEntity<?> updateConversation(@PathVariable UUID id, @Valid @RequestBody UpdateConversationRequest request) {
 		try {
 			String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
@@ -139,6 +173,7 @@ public class ConversationController {
 	}
 
 	@DeleteMapping("/{id}")
+	@Operation(summary = "Delete conversation", description = "Permanently delete a conversation and all its messages")
 	public ResponseEntity<?> deleteConversation(@PathVariable UUID id) {
 		try {
 			String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
@@ -163,6 +198,7 @@ public class ConversationController {
 	}
 
 	@GetMapping("/{id}/messages")
+	@Operation(summary = "Get messages", description = "Retrieve all messages in a conversation, ordered by creation time")
 	public ResponseEntity<?> getMessages(@PathVariable UUID id) {
 		try {
 			String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
@@ -186,6 +222,7 @@ public class ConversationController {
 	}
 
 	@PostMapping("/{id}/messages")
+	@Operation(summary = "Send message", description = "Send a message to a conversation and receive an AI assistant response")
 	public ResponseEntity<?> sendMessage(@PathVariable UUID id, @Valid @RequestBody SendMessageRequest request) {
 		try {
 			String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
@@ -207,7 +244,8 @@ public class ConversationController {
 
 			// Call the provider API
 			ProviderApiService apiService = providerApiServiceFactory.getProvider(provider.getCode());
-			ProviderApiResponse apiResponse = apiService.chat(history, model, providerConfig);
+			boolean thinking = request.getThinking() != null && request.getThinking();
+			ProviderApiResponse apiResponse = apiService.chat(history, model, providerConfig, thinking);
 
 			// Calculate total token count
 			Integer tokenCount = null;
@@ -235,6 +273,80 @@ public class ConversationController {
 					"success", false,
 					"message", "Failed to get response from AI provider: " + e.getMessage()
 			));
+		}
+	}
+
+	@PostMapping(value = "/{id}/messages/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	@Operation(summary = "Send message with streaming", description = "Send a message and stream the AI assistant response token by token via SSE")
+	public SseEmitter sendMessageStream(@PathVariable UUID id, @Valid @RequestBody SendMessageRequest request) {
+		try {
+			String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+			UUID userId = UUID.fromString(userIdStr);
+
+			// Verify ownership
+			Conversation conversation = conversationService.findByUserIdAndId(userId, id)
+					.orElseThrow(() -> new IllegalArgumentException("Conversation not found"));
+
+			Model model = conversation.getModel();
+			ProviderConfig providerConfig = conversation.getProviderConfig();
+			Provider provider = conversation.getProvider();
+
+			// Save user message
+			messageService.createMessage(id, "USER", request.getContent(), null, model.getId());
+
+			// Get conversation history for context
+			List<Message> history = messageService.findByConversationIdOrderByCreatedAtAsc(id);
+
+  		// Use streaming for llamacpp provider, fallback to sync for others
+ 			boolean thinking = request.getThinking() != null && request.getThinking();
+ 			if ("llamacpp".equalsIgnoreCase(provider.getCode()) && llamaCppProvider.isPresent()) {
+ 				return llamaCppProvider.get().chatStreaming(history, model, providerConfig, thinking, id, model.getId());
+ 			}
+
+ 			// Fallback: synchronous response wrapped in a single SSE event
+ 			ProviderApiService apiService = providerApiServiceFactory.getProvider(provider.getCode());
+ 			ProviderApiResponse apiResponse = apiService.chat(history, model, providerConfig, thinking);
+
+			Integer tokenCount = apiResponse.getOutputTokens();
+			messageService.createMessage(id, "ASSISTANT", apiResponse.getContent(), tokenCount, model.getId());
+
+			// Emit the full response as a single SSE event
+			SseEmitter emitter = new SseEmitter();
+			try {
+				emitter.send(SseEmitter.event()
+						.name("token")
+						.data("{\"content\":\"" + apiResponse.getContent().replace("\"", "\\\"") + "\",\"isThinking\":false}"));
+				emitter.send(SseEmitter.event()
+						.name("done")
+						.data("{\"inputTokens\":" + apiResponse.getInputTokens() + ",\"outputTokens\":" + tokenCount + "}"));
+			} catch (Exception e) {
+				// Ignore — client likely disconnected
+			}
+			emitter.complete();
+			return emitter;
+
+		} catch (IllegalArgumentException e) {
+			SseEmitter emitter = new SseEmitter();
+			try {
+				emitter.send(SseEmitter.event()
+						.name("error")
+						.data("{\"message\":\"" + e.getMessage().replace("\"", "\\\"") + "\"}"));
+			} catch (Exception ex) {
+				// Ignore
+			}
+			emitter.complete();
+			return emitter;
+		} catch (Exception e) {
+			SseEmitter emitter = new SseEmitter();
+			try {
+				emitter.send(SseEmitter.event()
+						.name("error")
+						.data("{\"message\":\"Failed to get response: " + e.getMessage().replace("\"", "\\\"") + "\"}"));
+			} catch (Exception ex) {
+				// Ignore
+			}
+			emitter.complete();
+			return emitter;
 		}
 	}
 

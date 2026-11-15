@@ -1,10 +1,10 @@
-package com.personal_ai.backend.service.impl;
+package com.personal_ai.backend.service.model.impl;
 
 import com.personal_ai.backend.model.Model;
 import com.personal_ai.backend.model.Provider;
 import com.personal_ai.backend.repository.ModelRepository;
 import com.personal_ai.backend.repository.ProviderRepository;
-import com.personal_ai.backend.service.ModelService;
+import com.personal_ai.backend.service.model.ModelService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 

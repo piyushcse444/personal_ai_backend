@@ -1,8 +1,10 @@
 package com.personal_ai.backend.controller;
 
 import com.personal_ai.backend.dto.RefreshRequest;
-import com.personal_ai.backend.service.AuthService;
-import com.personal_ai.backend.service.JwtService;
+import com.personal_ai.backend.service.auth.AuthService;
+import com.personal_ai.backend.service.auth.JwtService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -17,6 +19,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/auth")
+@Tag(name = "Authentication", description = "Token refresh and session management APIs")
 public class AuthController {
 
 	private final AuthService authService;
@@ -28,6 +31,7 @@ public class AuthController {
 	}
 
 	@PostMapping("/refresh")
+	@Operation(summary = "Refresh access token", description = "Generate a new access token using a valid refresh token")
 	public ResponseEntity<Map<String, Object>> refresh(@Valid @RequestBody RefreshRequest request) {
 		try {
 			Map<String, Object> result = authService.refresh(request.getRefreshToken());
@@ -41,6 +45,7 @@ public class AuthController {
 	}
 
 	@PostMapping("/logout")
+	@Operation(summary = "Logout", description = "Invalidate a refresh token and log out the current session")
 	public ResponseEntity<Map<String, Object>> logout(@Valid @RequestBody RefreshRequest request) {
 		try {
 			authService.logout(request.getRefreshToken());
@@ -57,6 +62,7 @@ public class AuthController {
 	}
 
 	@PostMapping("/logout-all")
+	@Operation(summary = "Logout all sessions", description = "Revoke all active sessions for the authenticated user")
 	public ResponseEntity<Map<String, Object>> logoutAll(HttpServletRequest httpRequest) {
 		try {
 			String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();

@@ -1,4 +1,4 @@
-package com.personal_ai.backend.service.impl;
+package com.personal_ai.backend.service.model.impl;
 
 import com.google.genai.Client;
 import com.google.genai.types.Content;
@@ -11,7 +11,7 @@ import com.personal_ai.backend.dto.ProviderApiResponse;
 import com.personal_ai.backend.model.Message;
 import com.personal_ai.backend.model.Model;
 import com.personal_ai.backend.model.ProviderConfig;
-import com.personal_ai.backend.service.ProviderApiService;
+import com.personal_ai.backend.service.provider.ProviderApiService;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -20,7 +20,7 @@ import java.util.List;
 public class GoogleProviderApiServiceImpl implements ProviderApiService {
 
 	@Override
-	public ProviderApiResponse chat(List<Message> messages, Model model, ProviderConfig config) {
+	public ProviderApiResponse chat(List<Message> messages, Model model, ProviderConfig config, boolean thinking) {
 		String apiKey = extractApiKey(config);
 		String modelName = model.getModelName();
 

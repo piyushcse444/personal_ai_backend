@@ -12,7 +12,6 @@ public class CreateConversationRequest {
 	@NotNull(message = "Model ID is required")
 	private UUID modelId;
 
-	@NotNull(message = "Provider config ID is required")
 	private UUID providerConfigId;
 
 	private String title;

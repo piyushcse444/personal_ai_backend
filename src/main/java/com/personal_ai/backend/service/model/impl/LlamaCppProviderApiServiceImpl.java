@@ -29,6 +29,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 @Service
@@ -123,10 +124,21 @@ public class LlamaCppProviderApiServiceImpl implements ProviderApiService {
 
 		ObjectNode requestBody = buildChatRequestBody(model.getModelName(), chatMessages, true, thinking, true);
 
-		// Complete emitter on client disconnect
-		emitter.onCompletion(() -> log.debug("SSE client disconnected"));
-		emitter.onTimeout(() -> log.warn("SSE client timeout"));
-		emitter.onError((e) -> log.warn("SSE error", e));
+		// Track whether the client is still connected — used to stop streaming early.
+		AtomicBoolean clientConnected = new AtomicBoolean(true);
+
+		emitter.onCompletion(() -> {
+			clientConnected.set(false);
+			log.debug("SSE client disconnected");
+		});
+		emitter.onTimeout(() -> {
+			clientConnected.set(false);
+			log.warn("SSE client timeout");
+		});
+		emitter.onError((e) -> {
+			clientConnected.set(false);
+			log.warn("SSE error", e);
+		});
 
 		Thread streamingThread = new Thread(() -> {
 			HttpURLConnection connection = null;
@@ -150,10 +162,12 @@ public class LlamaCppProviderApiServiceImpl implements ProviderApiService {
 
 				int responseCode = connection.getResponseCode();
 				if (responseCode != 200) {
-					emitter.send(SseEmitter.event()
-							.name("error")
-							.data(objectMapper.writeValueAsString(
-									new ErrorResponse("Server returned HTTP " + responseCode))));
+					if (clientConnected.get()) {
+						emitter.send(SseEmitter.event()
+								.name("error")
+								.data(objectMapper.writeValueAsString(
+										new ErrorResponse("Server returned HTTP " + responseCode))));
+					}
 					emitter.complete();
 					return;
 				}
@@ -166,7 +180,7 @@ public class LlamaCppProviderApiServiceImpl implements ProviderApiService {
 					StringBuilder responseContent = new StringBuilder();
 					int totalOutputTokens = 0;
 
-					while ((line = reader.readLine()) != null) {
+					while (clientConnected.get() && (line = reader.readLine()) != null) {
 						if (line.startsWith("data: ")) {
 							String data = line.substring(6);
 							if ("[DONE]".equals(data)) {
@@ -181,10 +195,12 @@ public class LlamaCppProviderApiServiceImpl implements ProviderApiService {
 									}
 								}
 								// Send final token counts
-								emitter.send(SseEmitter.event()
-										.name("done")
-										.data(objectMapper.writeValueAsString(
-												new DoneEvent(null, totalOutputTokens))));
+								if (clientConnected.get()) {
+									emitter.send(SseEmitter.event()
+											.name("done")
+											.data(objectMapper.writeValueAsString(
+													new DoneEvent(null, totalOutputTokens))));
+								}
 								emitter.complete();
 								return;
 							}
@@ -199,6 +215,10 @@ public class LlamaCppProviderApiServiceImpl implements ProviderApiService {
 												? delta.get("content").asText() : "";
 										String reasoningContent = (delta.has("reasoning_content") && !delta.get("reasoning_content").isNull())
 												? delta.get("reasoning_content").asText() : "";
+
+										if (!clientConnected.get()) {
+											break;
+										}
 
 										if (reasoningContent != null && !reasoningContent.isEmpty()) {
 											// Only stream thinking content to frontend if thinking was requested
@@ -232,7 +252,7 @@ public class LlamaCppProviderApiServiceImpl implements ProviderApiService {
 						}
 					}
 
-					// If we exit the loop without [DONE], still save and complete
+					// If we exit the loop without [DONE] and client is still connected, save and complete
 					if (responseContent.length() > 0) {
 						try {
 							messageService.createMessage(conversationId, "ASSISTANT",
@@ -242,24 +262,35 @@ public class LlamaCppProviderApiServiceImpl implements ProviderApiService {
 							log.error("Failed to save assistant message", saveEx);
 						}
 					}
-					emitter.send(SseEmitter.event()
-							.name("done")
-							.data(objectMapper.writeValueAsString(
-									new DoneEvent(null, totalOutputTokens))));
-					emitter.complete();
+					if (clientConnected.get()) {
+						emitter.send(SseEmitter.event()
+								.name("done")
+								.data(objectMapper.writeValueAsString(
+										new DoneEvent(null, totalOutputTokens))));
+						emitter.complete();
+					}
 				}
 
+			} catch (IllegalStateException e) {
+				// Emitter already completed — client likely disconnected
+				log.debug("SSE emitter already completed (client disconnected): {}", e.getMessage());
 			} catch (Exception e) {
 				log.error("Error streaming from Unsloth API", e);
 				try {
-					emitter.send(SseEmitter.event()
-							.name("error")
-							.data(objectMapper.writeValueAsString(
-									new ErrorResponse(e.getMessage()))));
+					if (clientConnected.get()) {
+						emitter.send(SseEmitter.event()
+								.name("error")
+								.data(objectMapper.writeValueAsString(
+										new ErrorResponse(e.getMessage()))));
+					}
 				} catch (Exception ex) {
-					log.warn("Failed to send error event", ex);
+					log.debug("Failed to send error event (client disconnected)", ex);
 				}
-				emitter.completeWithError(e);
+				try {
+					emitter.complete();
+				} catch (Exception ex) {
+					// Emitter may already be completed from onTimeout/onError
+				}
 			} finally {
 				if (connection != null) {
 					connection.disconnect();
