@@ -24,10 +24,9 @@ public class GoogleProviderApiServiceImpl implements ProviderApiService {
 		String apiKey = extractApiKey(config);
 		String modelName = model.getModelName();
 
-		// Create client with the API key from the provider config
-		Client geminiClient = new Client.Builder()
-				.apiKey(apiKey)
-				.build();
+		if (apiKey == null && !Boolean.TRUE.equals(model.getIsOffline())) {
+			throw new IllegalArgumentException("API key is required for online models");
+		}
 
 		// Build the content list from message history
 		List<Content> contents = new ArrayList<>();
@@ -48,6 +47,13 @@ public class GoogleProviderApiServiceImpl implements ProviderApiService {
 				.build();
 
 		try {
+			// Create client - API key is optional for offline models
+			Client.Builder clientBuilder = new Client.Builder();
+			if (apiKey != null) {
+				clientBuilder.apiKey(apiKey);
+			}
+			Client geminiClient = clientBuilder.build();
+
 			// Send the request to Gemini
 			GenerateContentResponse response = geminiClient.models.generateContent(
 					modelName,
@@ -81,7 +87,7 @@ public class GoogleProviderApiServiceImpl implements ProviderApiService {
 
 	private String extractApiKey(ProviderConfig config) {
 		if (config.getCredentialCiphertext() == null || config.getCredentialCiphertext().length == 0) {
-			throw new IllegalArgumentException("API key not configured for this provider config");
+			return null;
 		}
 		return new String(config.getCredentialCiphertext(), StandardCharsets.UTF_8);
 	}

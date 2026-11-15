@@ -9,6 +9,7 @@ import java.util.UUID;
 public interface ModelService {
 
     Model createModel(UUID providerId, String modelName, String displayName, Integer contextWindow);
+    Model createModel(UUID providerId, String modelName, String displayName, Integer contextWindow, Boolean isOffline);
 
     Optional<Model> findById(UUID id);
 
@@ -21,4 +22,6 @@ public interface ModelService {
     Model updateModel(UUID id, String displayName, Integer contextWindow, Boolean isActive);
 
     void deleteModel(UUID id);
+
+    long deleteAllModels();
 }

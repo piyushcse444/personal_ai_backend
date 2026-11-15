@@ -1,11 +1,23 @@
+server:
+  address: 0.0.0.0
+
 spring:
   application:
     name: personal-ai
-  
+
+  devtools:
+    restart:
+      enabled: false
   datasource:
     url: jdbc:postgresql://localhost:5432/personal-ai
     username: postgres
     password: Credo@123
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      idle-timeout: 300000
+      connection-timeout: 20000
+      max-lifetime: 1200000
   
   jpa:
     hibernate:
@@ -26,8 +38,14 @@ spring:
 
 app:
   cors:
-    allowed-origins: http://localhost:5173
+    allowed-origins: http://localhost:5173, http://10.196.169.181:5173
   jwt:
     secret: change-this-to-a-long-random-secret-at-least-256-bits-in-production
     expiration-ms: 86400000
     refresh-expiration-ms: 604800000
+  llamacpp:
+    enabled: true
+    base-url: http://127.0.0.1:8888
+    api-key: sk-unsloth-4203b2881dbe605f5363a3a333f63a22
+    model: AtomicChat/LFM3-1.7B-Uncensored-GGUF
+    max-seq-length: 2048

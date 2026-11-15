@@ -26,6 +26,11 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     public Model createModel(UUID providerId, String modelName, String displayName, Integer contextWindow) {
+        return createModel(providerId, modelName, displayName, contextWindow, false);
+    }
+
+    @Override
+    public Model createModel(UUID providerId, String modelName, String displayName, Integer contextWindow, Boolean isOffline) {
         Provider provider = providerRepository.findById(providerId)
                 .orElseThrow(() -> new IllegalArgumentException("Provider not found: " + providerId));
 
@@ -38,6 +43,7 @@ public class ModelServiceImpl implements ModelService {
                 .modelName(modelName.trim())
                 .displayName(displayName.trim())
                 .contextWindow(contextWindow)
+                .isOffline(isOffline)
                 .build();
 
         return modelRepository.save(model);
@@ -91,5 +97,12 @@ public class ModelServiceImpl implements ModelService {
             throw new IllegalArgumentException("Model not found: " + id);
         }
         modelRepository.deleteById(id);
+    }
+
+    @Override
+    public long deleteAllModels() {
+        long count = modelRepository.count();
+        modelRepository.deleteAll();
+        return count;
     }
 }
