@@ -72,6 +72,15 @@ public interface UnslothServerManager {
 	String getQuantForModel(String modelId);
 
 	/**
+	 * Look up the context length for a model from the cached model list.
+	 * The cache is populated during ensureModelReady() via listModels().
+	 *
+	 * @param modelId the model id (e.g., "AtomicChat/LFM3-1.7B-Uncensored-GGUF")
+	 * @return the context length (e.g., 20992), or 2048 as default if not found
+	 */
+	int getContextLengthForModel(String modelId);
+
+	/**
 	 * Information about an available model.
 	 */
 	record ModelInfo(
@@ -82,8 +91,9 @@ public interface UnslothServerManager {
 			boolean loaded,
 			String quant,
 			String displayName,
-			String statusValue
-	) {}
+			String statusValue,
+			int contextLength
+		) {}
 
 	/**
 	 * Inference status response from the API.

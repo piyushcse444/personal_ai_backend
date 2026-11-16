@@ -33,7 +33,6 @@ public class UnslothServerManagerImpl implements UnslothServerManager {
 
 	private final String baseUrl;
 	private final String apiKey;
-	private final int maxSeqLength;
 	private final RestClient restClient;
 	private final ObjectMapper objectMapper;
 
@@ -45,6 +44,10 @@ public class UnslothServerManagerImpl implements UnslothServerManager {
 	// Allows buildChatRequestBody() to resolve quant without an extra API call.
 	private volatile Map<String, String> modelQuantsCache = Collections.emptyMap();
 
+	// Cached model ID -> context length mapping, populated from /v1/models during ensureModelReady().
+	// Allows loadModel/unloadModel to use per-model context length instead of a hardcoded value.
+	private volatile Map<String, Integer> modelContextLengthsCache = Collections.emptyMap();
+
 	// Dedicated executor for model loading — prevents blocking the common ForkJoinPool
 	// which can cause HikariCP thread starvation warnings.
 	private static final ExecutorService loadExecutor = Executors.newSingleThreadExecutor(
@@ -52,11 +55,9 @@ public class UnslothServerManagerImpl implements UnslothServerManager {
 
 	public UnslothServerManagerImpl(
 			@org.springframework.beans.factory.annotation.Value("${app.unsloth.base-url:http://127.0.0.1:8888}") String baseUrl,
-			@org.springframework.beans.factory.annotation.Value("${app.unsloth.api-key:sk-unsloth-4203b2881dbe605f5363a3a333f63a22}") String apiKey,
-			@org.springframework.beans.factory.annotation.Value("${app.unsloth.max-seq-length:2048}") int maxSeqLength) {
+			@org.springframework.beans.factory.annotation.Value("${app.unsloth.api-key:sk-unsloth-4203b2881dbe605f5363a3a333f63a22}") String apiKey) {
 		this.baseUrl = baseUrl;
 		this.apiKey = apiKey;
-		this.maxSeqLength = maxSeqLength;
 		this.objectMapper = new ObjectMapper();
 		// Use SimpleClientHttpRequestFactory (HTTP/1.1 only) to avoid "Unsupported upgrade request"
 		// warnings from Unsloth server which doesn't support HTTP/2 upgrade (h2c ALPN)
@@ -110,28 +111,34 @@ public class UnslothServerManagerImpl implements UnslothServerManager {
 			}
 			JsonNode json = objectMapper.readTree(response);
 			JsonNode data = json.path("data");
-			List<ModelInfo> models = new ArrayList<>();
-			ConcurrentHashMap<String, String> quantsMap = new ConcurrentHashMap<>();
-			if (data.isArray()) {
-				for (JsonNode node : data) {
-					String id = node.path("id").asText("");
-					String object = node.path("object").asText("");
-					long created = node.path("created").asLong(0);
-					String ownedBy = node.path("owned_by").asText("");
-					boolean loaded = node.path("loaded").asBoolean(false);
-					String quant = node.path("quant").asText("");
-					String displayName = node.path("display_name").asText("");
-					String statusValue = node.path("status").path("value").asText("");
-					models.add(new ModelInfo(id, object, created, ownedBy, loaded, quant, displayName, statusValue));
-					if (!id.isEmpty() && !quant.isEmpty()) {
-						quantsMap.put(id, quant);
-					}
-				}
-			}
-			// Update the cache so getQuantForModel() can use it
-			this.modelQuantsCache = Map.copyOf(quantsMap);
-			log.debug("Listed {} models from Unsloth API", models.size());
-			return models;
+ 		List<ModelInfo> models = new ArrayList<>();
+ 		ConcurrentHashMap<String, String> quantsMap = new ConcurrentHashMap<>();
+ 		ConcurrentHashMap<String, Integer> contextLengthsMap = new ConcurrentHashMap<>();
+ 		if (data.isArray()) {
+ 			for (JsonNode node : data) {
+ 				String id = node.path("id").asText("");
+ 				String object = node.path("object").asText("");
+ 				long created = node.path("created").asLong(0);
+ 				String ownedBy = node.path("owned_by").asText("");
+ 				boolean loaded = node.path("loaded").asBoolean(false);
+ 				String quant = node.path("quant").asText("");
+ 				String displayName = node.path("display_name").asText("");
+ 				String statusValue = node.path("status").path("value").asText("");
+ 				int contextLength = node.path("context_length").asInt(0);
+ 				models.add(new ModelInfo(id, object, created, ownedBy, loaded, quant, displayName, statusValue, contextLength));
+ 				if (!id.isEmpty() && !quant.isEmpty()) {
+ 					quantsMap.put(id, quant);
+ 				}
+ 				if (!id.isEmpty() && contextLength > 0) {
+ 					contextLengthsMap.put(id, contextLength);
+ 				}
+ 			}
+ 		}
+ 		// Update the caches so getQuantForModel() and getContextLengthForModel() can use them
+ 		this.modelQuantsCache = Map.copyOf(quantsMap);
+ 		this.modelContextLengthsCache = Map.copyOf(contextLengthsMap);
+ 		log.debug("Listed {} models from Unsloth API", models.size());
+ 		return models;
 		} catch (Exception e) {
 			log.error("Failed to list models from Unsloth API: {}", e.getMessage(), e);
 			return Collections.emptyList();
@@ -152,6 +159,22 @@ public class UnslothServerManagerImpl implements UnslothServerManager {
 			}
 		}
 		return null;
+	}
+
+	@Override
+	public int getContextLengthForModel(String modelId) {
+		Integer ctxLen = modelContextLengthsCache.get(modelId);
+		if (ctxLen != null && ctxLen > 0) {
+			return ctxLen;
+		}
+		// Fallback: if cache is stale, try a live lookup
+		List<ModelInfo> models = listModels();
+		for (ModelInfo m : models) {
+			if (m.id().equals(modelId)) {
+				return m.contextLength() > 0 ? m.contextLength() : 2048;
+			}
+		}
+		return 2048; // default fallback
 	}
 
 	@Override
@@ -239,9 +262,10 @@ public class UnslothServerManagerImpl implements UnslothServerManager {
 		try {
 			log.info("Unloading model: {}", modelPath);
 			ObjectNode body = objectMapper.createObjectNode();
+			int contextLength = getContextLengthForModel(modelPath);
 			body.put("model_path", modelPath);
 			body.put("is_lora", false);
-			body.put("max_seq_length", maxSeqLength);
+			body.put("max_seq_length", contextLength);
 
 			String response = restClient.post()
 					.uri("/api/inference/unload")
@@ -345,7 +369,8 @@ public class UnslothServerManagerImpl implements UnslothServerManager {
 			return CompletableFuture.supplyAsync(() -> {
 				try {
 					log.info("Loading model: {} (exclusive load operation)", modelPath);
-					boolean loaded = loadModel(modelPath, maxSeqLength);
+					int contextLength = getContextLengthForModel(modelPath);
+					boolean loaded = loadModel(modelPath, contextLength);
 
 					if (!loaded) {
 						log.error("Failed to load model {}", modelPath);

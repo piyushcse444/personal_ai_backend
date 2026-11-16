@@ -17,6 +17,8 @@ public class MessageResponse {
 	private UUID id;
 	private String role;
 	private String content;
+	private String imageBase64;
+	private String imageMimeType;
 	private Integer tokenCount;
 	private OffsetDateTime createdAt;
 }

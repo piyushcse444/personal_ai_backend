@@ -23,4 +23,10 @@ public interface ModelRepository extends JpaRepository<Model, UUID> {
 
 	@Query("SELECT DISTINCT m FROM Model m LEFT JOIN FETCH m.provider WHERE m.provider.id = :providerId")
 	List<Model> findByProviderId(UUID providerId);
+
+	@Query("SELECT DISTINCT m FROM Model m LEFT JOIN FETCH m.provider WHERE m.modelType = :modelType AND m.isActive = true")
+	List<Model> findByModelTypeAndIsActiveTrue(Model.ModelType modelType);
+
+	@Query("SELECT DISTINCT m FROM Model m LEFT JOIN FETCH m.provider WHERE m.modelType = :modelType")
+	List<Model> findByModelType(Model.ModelType modelType);
 }

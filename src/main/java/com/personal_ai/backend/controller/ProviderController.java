@@ -104,17 +104,6 @@ public class ProviderController {
 		return ResponseEntity.ok(models);
 	}
 
-	@GetMapping("/models")
-	@Operation(summary = "List models", description = "List all available AI models, optionally filtered by provider ID")
-	public ResponseEntity<List<Model>> listModels(@RequestParam(required = false) UUID providerId) {
-		List<Model> models;
-		if (providerId != null) {
-			models = modelService.findActiveModelsByProviderId(providerId);
-		} else {
-			models = modelService.findAll();
-		}
-		return ResponseEntity.ok(models);
-	}
 
 	@GetMapping("/models/{id}")
 	@Operation(summary = "Get model by ID", description = "Retrieve details of a specific AI model by its ID")

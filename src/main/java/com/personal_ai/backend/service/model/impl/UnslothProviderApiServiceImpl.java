@@ -131,6 +131,7 @@ public class UnslothProviderApiServiceImpl implements ProviderApiService {
 	 */
 	public SseEmitter chatStreaming(List<Message> messages, Model model, ProviderConfig config, boolean thinking,
 			UUID conversationId, UUID modelId, String imageBase64, String imageMimeType, boolean internet) {
+		log.info("chatStreaming called: model={}, thinking={}, internet={}", model.getModelName(), thinking, internet);
 		ensureModelReady(model.getModelName());
 
 		SseEmitter emitter = new SseEmitter(0L);
@@ -151,6 +152,9 @@ public class UnslothProviderApiServiceImpl implements ProviderApiService {
 		}
 
 		ObjectNode requestBody = buildChatRequestBody(model.getModelName(), chatMessages, true, thinking, internet);
+		log.info("Sending request to Unsloth API: enableTools={}, enabledTools={}",
+				requestBody.path("enable_tools").asBoolean(false),
+				requestBody.path("enabled_tools").isArray() ? requestBody.path("enabled_tools").size() : 0);
 
 		// Track whether the client is still connected — used to stop streaming early.
 		AtomicBoolean clientConnected = new AtomicBoolean(true);
@@ -401,8 +405,9 @@ public class UnslothProviderApiServiceImpl implements ProviderApiService {
 		}
 		body.set("enabled_tools", toolsArray);
 
-		log.debug("Built chat request body: model={}, stream={}, thinking={}, enableTools={}",
-				modelIdentifier, stream, thinking, enableTools);
+		log.info("Built chat request body: model={}, stream={}, thinking={}, enableTools={}, enabledTools={}",
+				modelIdentifier, stream, thinking, enableTools,
+				enableTools ? "[web_search, python, terminal]" : "[]");
 
 		body.put("permission_mode", "off");
 

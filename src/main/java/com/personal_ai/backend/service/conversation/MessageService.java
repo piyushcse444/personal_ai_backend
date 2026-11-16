@@ -9,6 +9,7 @@ import java.util.UUID;
 public interface MessageService {
 
     Message createMessage(UUID conversationId, String role, String content, Integer tokenCount, UUID modelId);
+    Message createMessage(UUID conversationId, String role, String content, String imageBase64, String imageMimeType, UUID modelId);
 
     Optional<Message> findById(UUID id);
 

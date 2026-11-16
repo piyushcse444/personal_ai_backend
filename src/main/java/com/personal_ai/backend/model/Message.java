@@ -33,6 +33,12 @@ public class Message {
     @Column(nullable = false, columnDefinition = "text")
     private String content;
 
+    @Column(name = "image_base64", columnDefinition = "text")
+    private String imageBase64;
+
+    @Column(name = "image_mime_type", length = 100)
+    private String imageMimeType;
+
     @Column(name = "token_count")
     private Integer tokenCount;
 

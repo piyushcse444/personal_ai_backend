@@ -4,9 +4,7 @@ import com.personal_ai.backend.service.model.UnslothServerManager;
 import com.personal_ai.backend.service.model.UnslothServerManager.InferenceStatus;
 import com.personal_ai.backend.service.model.UnslothServerManager.ModelInfo;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
-import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.http.ResponseEntity;
@@ -27,20 +25,29 @@ public class UnslothModelController {
 		this.serverManager = serverManager;
 	}
 
-	@PostMapping("/models/{modelId}/unload")
-	@Operation(summary = "Unload a model", description = "Unload a specific model from the Unsloth inference engine to free up VRAM. " +
-			"Use this when you cannot run two models at the same time due to limited VRAM. " +
-			"Always returns 200 OK, even if the model is already unloaded or the service is unreachable.")
-	@ApiResponse(responseCode = "200", description = "Model unloaded successfully (or already unloaded)")
-	public ResponseEntity<?> unloadModel(
-			@Parameter(description = "Model ID to unload (e.g., 'AtomicChat/LFM3-1.7B-Uncensored-GGUF')", required = true)
-			@PathVariable String modelId) {
+	@PostMapping("/models/unload")
+	@Operation(summary = "Unload a model")
+	@ApiResponse(responseCode = "200", description = "Model unloaded")
+	public ResponseEntity<?> unloadModel(@RequestBody UnloadModelRequest request) {
+		String modelId = request.getModelId();
 		serverManager.unloadModel(modelId);
 		return ResponseEntity.ok(Map.of(
 				"success", true,
 				"message", "Model " + modelId + " unloaded successfully",
 				"model", modelId
 		));
+	}
+
+	public static class UnloadModelRequest {
+		private String modelId;
+
+		public String getModelId() {
+			return modelId;
+		}
+
+		public void setModelId(String modelId) {
+			this.modelId = modelId;
+		}
 	}
 
 	@GetMapping("/models")

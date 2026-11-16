@@ -19,6 +19,10 @@ public interface ModelService {
 
     List<Model> findAll();
 
+    List<Model> findByModelType(Model.ModelType modelType);
+
+    List<Model> findActiveByModelType(Model.ModelType modelType);
+
     Model updateModel(UUID id, String displayName, Integer contextWindow, Boolean isActive);
 
     void deleteModel(UUID id);

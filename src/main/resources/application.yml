@@ -47,4 +47,3 @@ app:
     enabled: true
     base-url: http://127.0.0.1:8888
     api-key: sk-unsloth-4203b2881dbe605f5363a3a333f63a22
-    max-seq-length: 100000

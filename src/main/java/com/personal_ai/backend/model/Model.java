@@ -48,6 +48,11 @@ public class Model {
     @Builder.Default
     private Boolean supportsVision = false;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "model_type", nullable = false)
+    @Builder.Default
+    private ModelType modelType = ModelType.CHAT;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -63,6 +68,13 @@ public class Model {
     @JsonIgnore
     @Builder.Default
     private List<Message> messages = new java.util.ArrayList<>();
+
+    public enum ModelType {
+        CHAT,
+        ASR,
+        TTS,
+        EMBEDDING
+    }
 
     @PrePersist
     protected void onCreate() {

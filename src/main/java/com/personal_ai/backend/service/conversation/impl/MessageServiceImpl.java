@@ -32,6 +32,15 @@ public class MessageServiceImpl implements MessageService {
 
     @Override
     public Message createMessage(UUID conversationId, String role, String content, Integer tokenCount, UUID modelId) {
+        return createMessageInternal(conversationId, role, content, null, null, tokenCount, modelId);
+    }
+
+    @Override
+    public Message createMessage(UUID conversationId, String role, String content, String imageBase64, String imageMimeType, UUID modelId) {
+        return createMessageInternal(conversationId, role, content, imageBase64, imageMimeType, null, modelId);
+    }
+
+    private Message createMessageInternal(UUID conversationId, String role, String content, String imageBase64, String imageMimeType, Integer tokenCount, UUID modelId) {
         Message.Role messageRole;
         try {
             messageRole = Message.Role.valueOf(role.toUpperCase());
@@ -63,6 +72,8 @@ public class MessageServiceImpl implements MessageService {
                 .conversation(conversation)
                 .role(messageRole)
                 .content(content)
+                .imageBase64(imageBase64)
+                .imageMimeType(imageMimeType)
                 .tokenCount(tokenCount)
                 .model(model)
                 .build();

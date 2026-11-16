@@ -74,6 +74,18 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public List<Model> findByModelType(Model.ModelType modelType) {
+        return modelRepository.findByModelType(modelType);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Model> findActiveByModelType(Model.ModelType modelType) {
+        return modelRepository.findByModelTypeAndIsActiveTrue(modelType);
+    }
+
+    @Override
     public Model updateModel(UUID id, String displayName, Integer contextWindow, Boolean isActive) {
         Model model = modelRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Model not found: " + id));

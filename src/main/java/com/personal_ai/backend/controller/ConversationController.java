@@ -291,26 +291,28 @@ public class ConversationController {
 			ProviderConfig providerConfig = conversation.getProviderConfig();
 			Provider provider = conversation.getProvider();
 
-			// Save user message (include image indicator if an image was uploaded)
+ 		// Save user message with image data if an image was uploaded
 			String userContent = request.getContent();
-			if (request.getImageBase64() != null && !request.getImageBase64().isEmpty()) {
+			String imageBase64 = request.getImageBase64();
+			String imageMimeType = request.getImageMimeType();
+			if (imageBase64 != null && !imageBase64.isEmpty()) {
 				// Prepend an image indicator so the chat history shows an image was sent
 				String prefix = "[Image uploaded]";
 				userContent = (userContent != null && !userContent.isEmpty())
 						? prefix + " " + userContent
 						: prefix;
 			}
-			messageService.createMessage(id, "USER", userContent, null, model.getId());
+			messageService.createMessage(id, "USER", userContent, imageBase64, imageMimeType, model.getId());
 
 			// Get conversation history for context
 			List<Message> history = messageService.findByConversationIdOrderByCreatedAtAsc(id);
 
   		// Use streaming for unsloth provider, fallback to sync for others
 			boolean thinking = request.getThinking() != null && request.getThinking();
-			boolean internet = request.getInternet() == null || request.getInternet();
-			if ("unsloth".equalsIgnoreCase(provider.getCode()) && unslothProvider.isPresent()) {
-				String imageBase64 = request.getImageBase64();
-				String imageMimeType = request.getImageMimeType();
+			Boolean internetRaw = request.getInternet();
+			boolean internet = internetRaw == null || internetRaw;
+			System.out.println("Received message request: thinking=" + thinking + ", internetRaw=" + internetRaw + ", internet=" + internet);
+ 		if ("unsloth".equalsIgnoreCase(provider.getCode()) && unslothProvider.isPresent()) {
 				return unslothProvider.get().chatStreaming(history, model, providerConfig, thinking, id, model.getId(), imageBase64, imageMimeType, internet);
 			}
 
@@ -383,6 +385,8 @@ public class ConversationController {
 				.id(message.getId())
 				.role(message.getRole() != null ? message.getRole().name() : null)
 				.content(message.getContent())
+				.imageBase64(message.getImageBase64())
+				.imageMimeType(message.getImageMimeType())
 				.tokenCount(message.getTokenCount())
 				.createdAt(message.getCreatedAt())
 				.build();
