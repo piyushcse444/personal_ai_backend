@@ -17,7 +17,8 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 
-import java.util.concurrent.ConcurrentHashMap;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -35,12 +36,6 @@ public class AudioTranscriptionService {
     private final ObjectMapper objectMapper;
     private final String baseUrl;
     private final String apiKey;
-
-    // Lock to prevent concurrent ASR model load/unload operations
-    private final ReentrantLock asrLock = new ReentrantLock();
-
-    // Track which ASR model is currently loaded to avoid redundant loads
-    private volatile String currentlyLoadedAsrModel = null;
 
     public AudioTranscriptionService(
             UnslothServerManager serverManager,
@@ -70,10 +65,6 @@ public class AudioTranscriptionService {
     public String transcribe(byte[] audioBytes, String audioFilename, Model model) {
         String modelPath = model.getModelName();
 
-        if (!asrLock.tryLock()) {
-            throw new IllegalStateException("Another transcription is in progress. Please try again later.");
-        }
-
         boolean modelWasLoaded = false;
         try {
             // Step 1: Check Unsloth health
@@ -82,24 +73,7 @@ public class AudioTranscriptionService {
                 throw new IllegalStateException("Unsloth server is not healthy or unavailable");
             }
 
-            // Step 2: Check if ASR model is already loaded
-            boolean alreadyLoaded = serverManager.isModelLoaded(modelPath);
-            if (alreadyLoaded) {
-                log.info("ASR model {} is already loaded", modelPath);
-                modelWasLoaded = true;
-                currentlyLoadedAsrModel = modelPath;
-            } else {
-                // Step 3: Load the ASR model
-                log.info("Loading ASR model: {}", modelPath);
-                if (!serverManager.ensureModelReady(modelPath)) {
-                    throw new IllegalStateException("Failed to load ASR model: " + modelPath);
-                }
-                modelWasLoaded = true;
-                currentlyLoadedAsrModel = modelPath;
-                log.info("ASR model {} loaded successfully", modelPath);
-            }
-
-            // Step 4: Perform transcription
+            // Step 2: Perform transcription
             String transcription = performTranscription(audioBytes, audioFilename, modelPath);
             log.info("Transcription completed successfully, length: {} chars", transcription.length());
             return transcription;
@@ -107,44 +81,58 @@ public class AudioTranscriptionService {
         } catch (Exception e) {
             log.error("Transcription failed: {}", e.getMessage(), e);
             throw new RuntimeException("Transcription failed: " + e.getMessage(), e);
-        } finally {
-            // Step 5: Unload the ASR model
-            try {
-                unloadAsrModel(modelPath);
-            } finally {
-                asrLock.unlock();
-            }
         }
     }
 
     /**
      * Perform the actual transcription request to Unsloth.
+     * Builds the multipart body manually as bytes so Content-Length is set explicitly,
+     * because Unsloth's server rejects chunked transfer encoding (HTTP 411).
      */
     private String performTranscription(byte[] audioBytes, String audioFilename, String modelPath) {
         try {
             // Determine content type from filename
-            String contentType = detectContentType(audioFilename);
+            String fileContentType = detectContentType(audioFilename);
+            String safeFilename = audioFilename != null ? audioFilename : "audio.wav";
 
-            // Build multipart request body
-            MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-            ByteArrayResource fileResource = new ByteArrayResource(audioBytes) {
-                @Override
-                public String getFilename() {
-                    return audioFilename != null ? audioFilename : "audio.wav";
-                }
-            };
-            body.add("file", fileResource);
-            body.add("model", modelPath);
+            // Build multipart body manually so we can compute Content-Length
+            String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
 
-            log.info("Sending transcription request to Unsloth: model={}, file={}, contentType={}",
-                    modelPath, audioFilename, contentType);
+            // Write "file" part
+            String fileHeader = "--" + boundary + "\r\n"
+                    + "Content-Disposition: form-data; name=\"file\"; filename=\"" + safeFilename + "\"\r\n"
+                    + "Content-Type: " + fileContentType + "\r\n"
+                    + "\r\n";
+            bos.write(fileHeader.getBytes(StandardCharsets.UTF_8));
+            bos.write(audioBytes);
+            bos.write("\r\n".getBytes(StandardCharsets.UTF_8));
 
-            // Send the request
+            // Write "model" part
+            String modelHeader = "--" + boundary + "\r\n"
+                    + "Content-Disposition: form-data; name=\"model\"\r\n"
+                    + "Content-Type: text/plain\r\n"
+                    + "\r\n";
+            bos.write(modelHeader.getBytes(StandardCharsets.UTF_8));
+            bos.write(modelPath.getBytes(StandardCharsets.UTF_8));
+            bos.write("\r\n".getBytes(StandardCharsets.UTF_8));
+
+            // Write closing boundary
+            bos.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+            bos.flush();
+
+            byte[] multipartBody = bos.toByteArray();
+
+            log.info("Sending transcription request to Unsloth: model={}, file={}, bodySize={} bytes",
+                    modelPath, safeFilename, multipartBody.length);
+
+            // Send the request with explicit Content-Length
             String response = restClient.post()
                     .uri("/v1/audio/transcriptions")
-                    .contentType(MediaType.MULTIPART_FORM_DATA)
+                    .contentType(MediaType.parseMediaType("multipart/form-data; boundary=" + boundary))
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
-                    .body(body)
+                    .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(multipartBody.length))
+                    .body(new ByteArrayResource(multipartBody))
                     .retrieve()
                     .body(String.class);
 
@@ -166,24 +154,6 @@ public class AudioTranscriptionService {
         } catch (Exception e) {
             log.error("ASR inference failed: {}", e.getMessage(), e);
             throw new RuntimeException("ASR inference failed: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Unload the ASR model after transcription.
-     * Only unloads if we loaded it or it was loaded for ASR purposes.
-     */
-    private void unloadAsrModel(String modelPath) {
-        if (currentlyLoadedAsrModel != null && currentlyLoadedAsrModel.equals(modelPath)) {
-            try {
-                log.info("Unloading ASR model: {}", modelPath);
-                serverManager.unloadModel(modelPath);
-                log.info("ASR model {} unloaded successfully", modelPath);
-            } catch (Exception e) {
-                log.warn("Failed to unload ASR model {}: {}", modelPath, e.getMessage());
-            } finally {
-                currentlyLoadedAsrModel = null;
-            }
         }
     }
 
